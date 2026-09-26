@@ -1,5 +1,6 @@
 import { and, desc, eq, gte, like, or, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
 import {
   branches,
   InsertUser,
@@ -12,14 +13,29 @@ import {
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
+let _pool: Pool | null = null;
 let _db: ReturnType<typeof drizzle> | null = null;
 
+function connectionString() {
+  return process.env.POSTGRES_PRISMA_URL || process.env.POSTGRES_URL || process.env.POSTGRES_URL_NON_POOLING || process.env.DATABASE_URL || "";
+}
+
 export async function getDb() {
-  if (!_db && process.env.DATABASE_URL) {
+  if (!_db) {
+    const url = connectionString();
+    if (!url) return null;
     try {
-      _db = drizzle(process.env.DATABASE_URL);
+      _pool = new Pool({
+        connectionString: url,
+        max: process.env.VERCEL ? 1 : 5,
+        idleTimeoutMillis: 10000,
+        connectionTimeoutMillis: 10000,
+        ssl: url.includes("sslmode=require") ? { rejectUnauthorized: false } : undefined,
+      });
+      _db = drizzle(_pool);
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
+      _pool = null;
       _db = null;
     }
   }
@@ -27,11 +43,7 @@ export async function getDb() {
 }
 
 function tenantSlug(name: string, openId: string) {
-  const normalized = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 48);
+  const normalized = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48);
   return `${normalized || "market"}-${openId.slice(-8).toLowerCase()}`;
 }
 
@@ -40,38 +52,36 @@ async function provisionTenantForUser(user: InsertUser) {
   if (!db) return;
 
   await db.transaction(async tx => {
-    const tenantResult = await tx
-      .insert(supermarkets)
-      .values({
-        name: `${user.name || "متجري"}`,
-        slug: tenantSlug(user.name || "market", user.openId),
-        phone: null,
-        address: null,
-      });
-    const supermarketId = Number((tenantResult as any)[0]?.insertId ?? 0);
+    const [tenant] = await tx.insert(supermarkets).values({
+      name: `${user.name || "متجري"}`,
+      slug: tenantSlug(user.name || "market", user.openId),
+      phone: null,
+      address: null,
+    }).returning({ id: supermarkets.id });
+    const supermarketId = tenant?.id ?? 0;
     if (!supermarketId) throw new Error("Tenant provisioning failed");
 
-    const branchResult = await tx.insert(branches).values({
+    const [branch] = await tx.insert(branches).values({
       supermarketId,
       name: "الفرع الرئيسي",
       address: null,
       phone: null,
-    });
-    const branchId = Number((branchResult as any)[0]?.insertId ?? 0);
+    }).returning({ id: branches.id });
+    const branchId = branch?.id ?? null;
 
     await tx.insert(users).values({
       openId: user.openId,
       name: user.name ?? null,
       email: user.email ?? null,
       loginMethod: user.loginMethod ?? null,
-      role: user.openId === ENV.ownerOpenId ? "SUPER_ADMIN" : "OWNER",
+      role: user.openId === ENV.ownerOpenId || user.email === ENV.ownerEmail ? "SUPER_ADMIN" : "OWNER",
       supermarketId,
-      branchId: branchId || null,
+      branchId,
       permissions: [],
       lastSignedIn: user.lastSignedIn ?? new Date(),
     });
 
-    const planResult = await tx.insert(subscriptionPlans).values({
+    const [plan] = await tx.insert(subscriptionPlans).values({
       name: "مجاني",
       code: `FREE-${supermarketId}`,
       price: "0",
@@ -81,12 +91,11 @@ async function provisionTenantForUser(user: InsertUser) {
       maxBranches: 1,
       maxInvoices: null,
       features: ["pos", "products", "invoices"],
-    });
-    const planId = Number((planResult as any)[0]?.insertId ?? 0);
-    if (planId) {
+    }).returning({ id: subscriptionPlans.id });
+    if (plan?.id) {
       await tx.insert(subscriptions).values({
         supermarketId,
-        planId,
+        planId: plan.id,
         status: "ACTIVE",
         endDate: null,
       });
@@ -97,10 +106,7 @@ async function provisionTenantForUser(user: InsertUser) {
 export async function upsertUser(user: InsertUser): Promise<void> {
   if (!user.openId) throw new Error("User openId is required for upsert");
   const db = await getDb();
-  if (!db) {
-    console.warn("[Database] Cannot upsert user: database not available");
-    return;
-  }
+  if (!db) throw new Error("Database is not configured");
 
   const existing = await getUserByOpenId(user.openId);
   if (!existing) {
@@ -112,9 +118,7 @@ export async function upsertUser(user: InsertUser): Promise<void> {
     }
   }
 
-  const updateSet: Record<string, unknown> = {
-    lastSignedIn: user.lastSignedIn ?? new Date(),
-  };
+  const updateSet: Record<string, unknown> = { lastSignedIn: user.lastSignedIn ?? new Date() };
   const values: InsertUser = { openId: user.openId, lastSignedIn: user.lastSignedIn ?? new Date() };
   for (const field of ["name", "email", "loginMethod"] as const) {
     if (user[field] !== undefined) {
@@ -125,12 +129,12 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   if (user.role !== undefined) {
     values.role = user.role;
     updateSet.role = user.role;
-  } else if (user.openId === ENV.ownerOpenId) {
+  } else if (user.openId === ENV.ownerOpenId || user.email === ENV.ownerEmail) {
     values.role = "SUPER_ADMIN";
     updateSet.role = "SUPER_ADMIN";
   }
 
-  await db.insert(users).values(values).onDuplicateKeyUpdate({ set: updateSet });
+  await db.insert(users).values(values).onConflictDoUpdate({ target: users.openId, set: updateSet });
 }
 
 export async function getUserByOpenId(openId: string) {
@@ -147,16 +151,8 @@ export async function getDashboardMetrics(supermarketId: number) {
     db.select({ count: sql<number>`count(*)` }).from(products).where(eq(products.supermarketId, supermarketId)),
     db.select({ count: sql<number>`count(*)` }).from(invoices).where(eq(invoices.supermarketId, supermarketId)),
     db.select({ total: sql<string>`coalesce(sum(${invoices.total}), 0)` }).from(invoices).where(eq(invoices.supermarketId, supermarketId)),
-    db
-      .select({ count: sql<number>`count(*)` })
-      .from(products)
-      .where(and(eq(products.supermarketId, supermarketId), sql`${products.stockQuantity} <= ${products.minimumStock}`)),
-    db
-      .select()
-      .from(invoices)
-      .where(eq(invoices.supermarketId, supermarketId))
-      .orderBy(desc(invoices.createdAt))
-      .limit(5),
+    db.select({ count: sql<number>`count(*)` }).from(products).where(and(eq(products.supermarketId, supermarketId), sql`${products.stockQuantity} <= ${products.minimumStock}`)),
+    db.select().from(invoices).where(eq(invoices.supermarketId, supermarketId)).orderBy(desc(invoices.createdAt)).limit(5),
   ]);
   return {
     products: Number(productCount[0]?.count ?? 0),
@@ -171,30 +167,17 @@ export async function findProducts(supermarketId: number, search = "") {
   const db = await getDb();
   if (!db) return [];
   const term = `%${search.trim()}%`;
-  return db
-    .select()
-    .from(products)
-    .where(
-      and(
-        eq(products.supermarketId, supermarketId),
-        eq(products.isActive, true),
-        search.trim()
-          ? or(like(products.barcode, term), like(products.name, term), like(products.sku, term))
-          : undefined,
-      ),
-    )
-    .orderBy(desc(products.updatedAt))
-    .limit(100);
+  return db.select().from(products).where(and(
+    eq(products.supermarketId, supermarketId),
+    eq(products.isActive, true),
+    search.trim() ? or(like(products.barcode, term), like(products.name, term), like(products.sku, term)) : undefined,
+  )).orderBy(desc(products.updatedAt)).limit(100);
 }
 
 export async function findProductByBarcode(supermarketId: number, barcode: string) {
   const db = await getDb();
   if (!db) return undefined;
-  const result = await db
-    .select()
-    .from(products)
-    .where(and(eq(products.supermarketId, supermarketId), eq(products.barcode, barcode), eq(products.isActive, true)))
-    .limit(1);
+  const result = await db.select().from(products).where(and(eq(products.supermarketId, supermarketId), eq(products.barcode, barcode), eq(products.isActive, true))).limit(1);
   return result[0];
 }
 

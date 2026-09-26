@@ -1,5 +1,4 @@
 import { useAuth } from "@/_core/hooks/useAuth";
-import { startLogin } from "@/const";
 import { trpc } from "@/lib/trpc";
 import { addProductToCart, cartSubtotal } from "@shared/pos";
 import { buildInvoiceAnnouncement } from "@shared/voice";
@@ -66,6 +65,7 @@ const navItems: NavItem[] = [
   { path: "/branches", label: "الفروع", icon: Building2, group: "الإعدادات" },
   { path: "/subscriptions", label: "الاشتراك", icon: CreditCard, group: "الإعدادات" },
   { path: "/settings", label: "إعدادات المتجر", icon: Settings, group: "الإعدادات" },
+  { path: "/super-admin", label: "الإدارة العليا", icon: ShieldCheck, group: "الإدارة العليا" },
 ];
 
 const money = (value: number | string | null | undefined) => `${Number(value ?? 0).toLocaleString("ar-EG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ج.م`;
@@ -76,21 +76,37 @@ function IconButton({ children, label, onClick }: { children: ReactNode; label: 
   return <button onClick={onClick} aria-label={label} className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#dbe5e1] bg-white text-[#466269] hover:border-[#94c6b7] hover:text-[#0f5d4d]">{children}</button>;
 }
 
-function PublicWelcome({ loading }: { loading: boolean }) {
+function PublicWelcome({ loading, signIn, signUp, supabaseConfigured }: { loading: boolean; signIn: (email: string, password: string) => Promise<void>; signUp: (email: string, password: string, fullName: string) => Promise<void>; supabaseConfigured: boolean }) {
+  const [loginOpen, setLoginOpen] = useState(false);
+  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [authMessage, setAuthMessage] = useState("");
+  const submitAuth = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setAuthError(""); setAuthMessage("");
+    try {
+      if (mode === "signin") await signIn(email.trim(), password);
+      else { await signUp(email.trim(), password, fullName.trim()); setAuthMessage("تم إنشاء الحساب. إذا كان تأكيد البريد مفعّلًا، راجع بريدك ثم سجّل الدخول."); setMode("signin"); }
+    } catch (error) { setAuthError(error instanceof Error ? error.message : "تعذر تنفيذ تسجيل الدخول."); }
+  };
+  const openLogin = () => { setLoginOpen(true); setAuthError(""); setAuthMessage(""); };
   return (
     <div className="min-h-screen overflow-hidden bg-[#071723] text-[#effbf7]" dir="rtl">
       <div className="absolute inset-0 dot-grid" />
       <div className="relative mx-auto flex min-h-screen max-w-7xl flex-col px-6 py-8 lg:px-12">
         <header className="flex items-center justify-between">
           <div className="flex items-center gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#b8efdc] text-[#08231e]"><Store size={22} /></div><div><div className="font-extrabold tracking-tight">سوقي</div><div className="text-xs text-[#9ab3b6]">نظام تشغيل متجرك</div></div></div>
-          <button onClick={() => startLogin()} className="rounded-xl border border-[#3b5964] px-4 py-2 text-sm font-bold text-[#d7e9e4] hover:bg-[#123245]">{loading ? "جارٍ التحميل" : "تسجيل الدخول"}</button>
+          <button onClick={openLogin} className="rounded-xl border border-[#3b5964] px-4 py-2 text-sm font-bold text-[#d7e9e4] hover:bg-[#123245]">{loading ? "جارٍ التحميل" : "تسجيل الدخول"}</button>
         </header>
         <main className="grid flex-1 items-center gap-12 py-16 lg:grid-cols-[1.05fr_0.95fr]">
           <section>
             <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-[#335469] bg-[#0d2a3a] px-3 py-1.5 text-xs font-bold text-[#b8efdc]"><Zap size={14} /> كاشير أسرع. قرارات أوضح.</div>
             <h1 className="max-w-2xl text-5xl font-extrabold leading-[1.18] tracking-[-0.04em] md:text-7xl">كل عملية بيع،<br /><span className="text-[#b8efdc]">في نبضة واحدة.</span></h1>
             <p className="mt-7 max-w-xl text-lg leading-8 text-[#a9c0c1]">من أول مسح للباركود حتى طباعة الفاتورة وتحديث المخزون. منصة تشغيل عربية مصممة لتبقى يد الكاشير على الماسح.</p>
-            <div className="mt-9 flex flex-wrap gap-3"><button onClick={() => startLogin()} className="flex items-center gap-2 rounded-xl bg-[#b8efdc] px-5 py-3.5 font-extrabold text-[#08231e] shadow-[0_12px_30px_rgba(184,239,220,0.16)] hover:bg-[#d4faec]">ابدأ الآن <ChevronLeft size={18} /></button><div className="flex items-center gap-2 rounded-xl border border-[#294958] px-4 py-3 text-sm text-[#b7cacc]"><ShieldCheck size={16} className="text-[#ffda73]" /> عزل بيانات كل متجر</div></div>
+            <div className="mt-9 flex flex-wrap gap-3"><button onClick={openLogin} className="flex items-center gap-2 rounded-xl bg-[#b8efdc] px-5 py-3.5 font-extrabold text-[#08231e] shadow-[0_12px_30px_rgba(184,239,220,0.16)] hover:bg-[#d4faec]">ابدأ الآن <ChevronLeft size={18} /></button><div className="flex items-center gap-2 rounded-xl border border-[#294958] px-4 py-3 text-sm text-[#b7cacc]"><ShieldCheck size={16} className="text-[#ffda73]" /> عزل بيانات كل متجر</div></div>
             <div className="mt-14 grid max-w-lg grid-cols-3 gap-5 border-t border-[#244250] pt-6"><div><div className="text-2xl font-extrabold">0.2s</div><div className="mt-1 text-xs text-[#8ca7a9]">استجابة المسح</div></div><div><div className="text-2xl font-extrabold">100%</div><div className="mt-1 text-xs text-[#8ca7a9]">حفظ ذري للفواتير</div></div><div><div className="text-2xl font-extrabold">RTL</div><div className="mt-1 text-xs text-[#8ca7a9]">واجهة عربية أصلية</div></div></div>
           </section>
           <section className="relative mx-auto w-full max-w-lg">
@@ -104,6 +120,7 @@ function PublicWelcome({ loading }: { loading: boolean }) {
           </section>
         </main>
       </div>
+      {loginOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#031018]/80 p-4 backdrop-blur-sm"><form onSubmit={submitAuth} className="w-full max-w-sm rounded-3xl border border-[#315362] bg-[#0b2534] p-6 shadow-2xl"><div className="flex items-center justify-between"><div><h2 className="text-xl font-extrabold">{mode === "signin" ? "تسجيل الدخول" : "إنشاء حساب"}</h2><p className="mt-1 text-xs text-[#9eb7b7]">الدخول الآمن عبر Supabase</p></div><button type="button" onClick={() => setLoginOpen(false)} className="text-[#a7c2c1]">✕</button></div>{!supabaseConfigured && <div className="mt-4 rounded-xl border border-[#8c5a58] bg-[#3b2228] p-3 text-xs leading-5 text-[#ffd8d3]">أضف VITE_SUPABASE_URL و VITE_SUPABASE_ANON_KEY إلى Vercel.</div>}<div className="mt-5 space-y-3">{mode === "signup" && <input required value={fullName} onChange={e => setFullName(e.target.value)} placeholder="الاسم" className="w-full rounded-xl border border-[#315362] bg-[#071723] px-3 py-3 text-sm text-white outline-none" />}<input required type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="البريد الإلكتروني" className="w-full rounded-xl border border-[#315362] bg-[#071723] px-3 py-3 text-sm text-white outline-none" /><input required minLength={6} type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="كلمة المرور" className="w-full rounded-xl border border-[#315362] bg-[#071723] px-3 py-3 text-sm text-white outline-none" /></div>{authError && <p className="mt-3 text-xs leading-5 text-[#ffb3aa]">{authError}</p>}{authMessage && <p className="mt-3 text-xs leading-5 text-[#b8efdc]">{authMessage}</p>}<button disabled={!supabaseConfigured} className="mt-5 w-full rounded-xl bg-[#b8efdc] py-3 text-sm font-extrabold text-[#08231e] disabled:opacity-50">{mode === "signin" ? "دخول" : "إنشاء الحساب"}</button><button type="button" onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setAuthError(""); }} className="mt-3 w-full text-xs font-bold text-[#b8efdc]">{mode === "signin" ? "ليس لديك حساب؟ إنشاء حساب" : "لديك حساب؟ تسجيل الدخول"}</button></form></div>}
     </div>
   );
 }
@@ -117,7 +134,7 @@ function Sidebar({ path, navigate, role, onLogout }: { path: string; navigate: (
   return <aside className="hidden w-[264px] shrink-0 flex-col bg-[#071723] text-[#e5f3ef] lg:flex">
     <div className="flex items-center gap-3 px-6 py-7"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#b8efdc] text-[#08231e]"><Store size={20} /></div><div><div className="font-extrabold tracking-tight">سوقي</div><div className="text-[11px] text-[#86a3a6]">إدارة المتجر بوضوح</div></div></div>
     <div className="mx-4 mb-5 rounded-2xl border border-[#214150] bg-[#0d2938] p-3"><div className="flex items-center gap-2 text-xs font-bold"><div className="h-2 w-2 rounded-full bg-[#b8efdc]" /> متجر النور</div><div className="mt-2 flex items-center justify-between text-[11px] text-[#86a3a6]"><span>الخطة المجانية</span><span className="rounded-full bg-[#173c4b] px-2 py-0.5 text-[#b8efdc]">نشطة</span></div></div>
-    <nav className="scroll-thin flex-1 overflow-y-auto px-3 pb-4">{groups.map(group => <div key={group} className="mb-5"><div className="px-3 pb-2 text-[10px] font-extrabold uppercase tracking-[0.13em] text-[#648286]">{group}</div>{navItems.filter(item => item.group === group).map(item => { const Icon = item.icon; const active = path === item.path || (path === "/" && item.path === "/pos"); return <button key={item.path} onClick={() => navigate(item.path)} className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors ${active ? "bg-[#b8efdc] text-[#08231e] shadow-[0_8px_20px_rgba(184,239,220,0.1)]" : "text-[#a4babc] hover:bg-[#123245] hover:text-white"}`}><Icon size={17} /><span>{item.label}</span>{item.path === "/pos" && <span className={`mr-auto rounded-md px-1.5 py-0.5 text-[9px] font-bold ${active ? "bg-[#d5faed]" : "bg-[#193e4d] text-[#98b7b6]"}`}>F2</span>}</button>; })}</div>)}</nav>
+    <nav className="scroll-thin flex-1 overflow-y-auto px-3 pb-4">{groups.map(group => <div key={group} className="mb-5"><div className="px-3 pb-2 text-[10px] font-extrabold uppercase tracking-[0.13em] text-[#648286]">{group}</div>{navItems.filter(item => item.group === group && (item.path !== "/super-admin" || role === "SUPER_ADMIN")).map(item => { const Icon = item.icon; const active = path === item.path || (path === "/" && item.path === "/pos"); return <button key={item.path} onClick={() => navigate(item.path)} className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors ${active ? "bg-[#b8efdc] text-[#08231e] shadow-[0_8px_20px_rgba(184,239,220,0.1)]" : "text-[#a4babc] hover:bg-[#123245] hover:text-white"}`}><Icon size={17} /><span>{item.label}</span>{item.path === "/pos" && <span className={`mr-auto rounded-md px-1.5 py-0.5 text-[9px] font-bold ${active ? "bg-[#d5faed]" : "bg-[#193e4d] text-[#98b7b6]"}`}>F2</span>}</button>; })}</div>)}</nav>
     <div className="border-t border-[#193745] p-4"><div className="mb-3 flex items-center gap-3 rounded-xl px-2 py-2"><div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#ffda73] font-extrabold text-[#573c00]">م</div><div className="min-w-0"><div className="truncate text-xs font-bold">مدير المتجر</div><div className="truncate text-[10px] text-[#86a3a6]">{role === "SUPER_ADMIN" ? "مسؤول المنصة" : "مالك المتجر"}</div></div></div><button onClick={onLogout} className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold text-[#9ab2b4] hover:bg-[#123245] hover:text-white"><LogOut size={15} /> تسجيل الخروج</button></div>
   </aside>;
 }
@@ -302,7 +319,12 @@ function UsersView() {
 }
 
 function SettingsView() {
-  return <div className="grid gap-4 xl:grid-cols-2"><section className="soft-shadow rounded-2xl border border-[#e0e9e6] bg-white p-5"><div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#e7eef8] text-[#476f9b]"><Settings size={18} /></div><div><h3 className="font-extrabold text-[#29464e]">إعدادات التشغيل</h3><p className="text-[11px] text-[#8a9c9c]">تهيئة المتجر وطباعة الفواتير</p></div></div><div className="mt-6 space-y-3"><SettingRow label="العملة" value="جنيه مصري (ج.م)" /><SettingRow label="اللغة" value="العربية · RTL" /><SettingRow label="الطابعة" value="غير مهيأة" action="تهيئة" /><SettingRow label="ترقيم الفواتير" value="INV-YYYYMMDD-XXXXXXX" /></div></section><section className="soft-shadow rounded-2xl border border-[#e0e9e6] bg-white p-5"><div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#fff3cf] text-[#9a7100]"><Zap size={18} /></div><div><h3 className="font-extrabold text-[#29464e]">اختصارات الكاشير</h3><p className="text-[11px] text-[#8a9c9c]">لتقليل استخدام الماوس</p></div></div><div className="mt-6 space-y-3"><Shortcut keys="F2" label="فتح نقطة البيع" /><Shortcut keys="Enter" label="إضافة الباركود" /><Shortcut keys="Ctrl + P" label="طباعة الفاتورة" /><Shortcut keys="Esc" label="إلغاء الحقل الحالي" /></div></section></div>;
+  const settings = trpc.settings.get.useQuery();
+  const [form, setForm] = useState({ name: "", phone: "", address: "" });
+  useEffect(() => { if (settings.data) setForm({ name: settings.data.name, phone: settings.data.phone ?? "", address: settings.data.address ?? "" }); }, [settings.data]);
+  const update = trpc.settings.updateStore.useMutation({ onSuccess: store => { setForm({ name: store.name, phone: store.phone ?? "", address: store.address ?? "" }); toast.success("تم حفظ إعدادات المتجر"); void settings.refetch(); }, onError: error => toast.error(error.message) });
+  const submit = (event: React.FormEvent) => { event.preventDefault(); update.mutate({ name: form.name, phone: form.phone || null, address: form.address || null }); };
+  return <div className="grid gap-4 xl:grid-cols-2"><form onSubmit={submit} className="soft-shadow rounded-2xl border border-[#e0e9e6] bg-white p-5"><div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#e7eef8] text-[#476f9b]"><Settings size={18} /></div><div><h3 className="font-extrabold text-[#29464e]">إعدادات المتجر</h3><p className="text-[11px] text-[#8a9c9c]">تُحفظ مباشرة في قاعدة البيانات المشتركة</p></div></div><div className="mt-6 space-y-3"><Field label="اسم المتجر"><input required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="اسم المتجر" /></Field><Field label="الهاتف"><input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="01xxxxxxxxx" /></Field><Field label="العنوان"><textarea value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} placeholder="عنوان المتجر" className="min-h-24 w-full rounded-xl border border-[#dfe9e5] bg-[#f8fbfa] p-3 text-xs outline-none focus:border-[#77bca8]" /></Field><button disabled={update.isPending || settings.isLoading} className="w-full rounded-xl bg-[#0f5d4d] py-3 text-sm font-extrabold text-white disabled:opacity-50">{update.isPending ? "جارٍ الحفظ..." : "حفظ الإعدادات"}</button></div></form><section className="soft-shadow rounded-2xl border border-[#e0e9e6] bg-white p-5"><div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#fff3cf] text-[#9a7100]"><Zap size={18} /></div><div><h3 className="font-extrabold text-[#29464e]">اختصارات الكاشير</h3><p className="text-[11px] text-[#8a9c9c]">لتقليل استخدام الماوس</p></div></div><div className="mt-6 space-y-3"><Shortcut keys="F2" label="فتح نقطة البيع" /><Shortcut keys="Enter" label="إضافة الباركود" /><Shortcut keys="Ctrl + P" label="طباعة الفاتورة" /><Shortcut keys="Esc" label="إلغاء الحقل الحالي" /></div><div className="mt-5 rounded-xl bg-[#f8fbfa] p-3 text-xs leading-6 text-[#667d7f]">العملة: <strong>جنيه مصري (ج.م)</strong><br />اللغة: <strong>العربية · RTL</strong><br />ترقيم الفواتير: <strong>INV-YYYYMMDD-XXXXXXX</strong></div></section></div>;
 }
 function SettingRow({ label, value, action }: { label: string; value: string; action?: string }) { return <div className="flex items-center justify-between border-b border-[#edf2f0] py-3 last:border-0"><span className="text-xs font-bold text-[#637a7d]">{label}</span><div className="flex items-center gap-2 text-xs font-extrabold text-[#34545c]">{value}{action && <button className="rounded-lg bg-[#e7f5f0] px-2 py-1 text-[10px] text-[#267a60]">{action}</button>}</div></div>; }
 function Shortcut({ keys, label }: { keys: string; label: string }) { return <div className="flex items-center justify-between rounded-xl bg-[#f8fbfa] px-3 py-2.5"><span className="text-xs font-bold text-[#5e777a]">{label}</span><kbd className="rounded-md border border-[#d7e3df] bg-white px-2 py-1 text-[10px] font-extrabold text-[#557074]">{keys}</kbd></div>; }
@@ -326,7 +348,7 @@ function MobileBottomNav({ path, navigate }: { path: string; navigate: (path: st
 }
 
 export default function Home() {
-  const { user, loading, isAuthenticated, logout } = useAuth();
+  const { user, loading, isAuthenticated, logout, signIn, signUp, supabaseConfigured } = useAuth();
   const [location, navigate] = useLocation();
   const bootstrap = trpc.bootstrap.useQuery(undefined, { enabled: isAuthenticated, retry: false });
   const metrics = trpc.dashboard.metrics.useQuery(undefined, { enabled: isAuthenticated, retry: false });
@@ -334,7 +356,7 @@ export default function Home() {
   const section = location === "/" ? (isAuthenticated ? "/pos" : "/") : location;
   const current = navItems.find(item => item.path === section);
   useEffect(() => { if (isAuthenticated && location === "/") navigate("/pos"); }, [isAuthenticated, location, navigate]);
-  if (!isAuthenticated) return <PublicWelcome loading={loading} />;
+  if (!isAuthenticated) return <PublicWelcome loading={loading} signIn={signIn} signUp={signUp} supabaseConfigured={supabaseConfigured} />;
   const title = section === "/pos" ? "نقطة البيع" : section === "/dashboard" ? "نظرة عامة" : section === "/products" ? "المنتجات" : section === "/inventory" ? "المخزون" : section === "/invoices" ? "الفواتير" : section === "/reports" ? "التقارير" : section === "/users" ? "المستخدمون" : section === "/branches" ? "الفروع" : section === "/subscriptions" ? "الاشتراك" : section === "/settings" ? "إعدادات المتجر" : section === "/super-admin" ? "الإدارة العليا" : current?.label || "المتجر";
   const subtitle = section === "/pos" ? "امسح، أضف، احفظ — بدون توقف" : section === "/dashboard" ? "ملخص أداء المتجر وحركة التشغيل" : "إدارة بيانات المتجر بصلاحيات واضحة";
   const view = section === "/pos" ? <PosView role={role} userId={user?.id || 0} /> : section === "/dashboard" ? <DashboardView metrics={metrics.data || bootstrap.data?.metrics} /> : section === "/products" ? <ProductsView /> : section === "/invoices" ? <InvoicesView /> : section === "/inventory" ? <InventoryView /> : section === "/users" ? <UsersView /> : section === "/settings" ? <SettingsView /> : section === "/super-admin" && role === "SUPER_ADMIN" ? <SuperAdminView /> : <DashboardView metrics={metrics.data || bootstrap.data?.metrics} />;

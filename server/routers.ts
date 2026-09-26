@@ -101,7 +101,7 @@ export const appRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "قاعدة البيانات غير متاحة." });
       try {
-        const result = await db.insert(products).values({
+        const [created] = await db.insert(products).values({
           supermarketId,
           branchId: input.branchId ?? ctx.user.branchId ?? null,
           categoryId: input.categoryId ?? null,
@@ -115,8 +115,8 @@ export const appRouter = router({
           stockQuantity: input.stockQuantity.toFixed(3),
           minimumStock: input.minimumStock.toFixed(3),
           description: input.description ?? null,
-        });
-        const id = Number((result as any)[0]?.insertId ?? 0);
+        }).returning({ id: products.id });
+        const id = created?.id ?? 0;
         await db.insert(auditLogs).values({
           supermarketId,
           userId: ctx.user.id,
@@ -128,7 +128,7 @@ export const appRouter = router({
         return { id, success: true };
       } catch (error) {
         const message = String(error);
-        if (message.includes("Duplicate") || message.includes("duplicate")) {
+        if (message.includes("Duplicate") || message.includes("duplicate") || message.includes("23505") || message.includes("unique")) {
           throw new TRPCError({ code: "CONFLICT", message: "هذا الباركود محفوظ بالفعل." });
         }
         throw error;
@@ -144,8 +144,9 @@ export const appRouter = router({
         const result = await db
           .update(products)
           .set({ sellingPrice: input.sellingPrice.toFixed(2) })
-          .where(and(eq(products.id, input.id), eq(products.supermarketId, supermarketId)));
-        if (!Number((result as any)[0]?.affectedRows ?? 0)) {
+          .where(and(eq(products.id, input.id), eq(products.supermarketId, supermarketId)))
+          .returning({ id: products.id });
+        if (!result[0]) {
           throw new TRPCError({ code: "NOT_FOUND", message: "المنتج غير موجود." });
         }
         await db.insert(auditLogs).values({
@@ -181,8 +182,9 @@ export const appRouter = router({
             minimumStock: input.minimumStock.toFixed(3),
             description: input.description ?? null,
           })
-          .where(and(eq(products.id, input.id), eq(products.supermarketId, supermarketId)));
-        if (!Number((result as any)[0]?.affectedRows ?? 0)) {
+          .where(and(eq(products.id, input.id), eq(products.supermarketId, supermarketId)))
+          .returning({ id: products.id });
+        if (!result[0]) {
           throw new TRPCError({ code: "NOT_FOUND", message: "المنتج غير موجود." });
         }
         await db.insert(auditLogs).values({
@@ -210,8 +212,8 @@ export const appRouter = router({
         const db = await getDb();
         if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "قاعدة البيانات غير متاحة." });
         try {
-          const result = await db.insert(categories).values({ supermarketId, name: input.name });
-          return { id: Number((result as any)[0]?.insertId ?? 0), success: true };
+          const [created] = await db.insert(categories).values({ supermarketId, name: input.name }).returning({ id: categories.id });
+          return { id: created?.id ?? 0, success: true };
         } catch {
           throw new TRPCError({ code: "CONFLICT", message: "القسم موجود بالفعل." });
         }
@@ -275,7 +277,7 @@ export const appRouter = router({
           const subtotal = lineItems.reduce((sum, item) => sum + item.total, 0);
           const total = Math.max(0, subtotal - input.discount + input.tax);
           const invoiceNumber = `INV-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${nanoid(7).toUpperCase()}`;
-          const invoiceResult = await tx.insert(invoices).values({
+          const [createdInvoice] = await tx.insert(invoices).values({
             supermarketId,
             branchId: ctx.user.branchId ?? null,
             cashierId: ctx.user.id,
@@ -287,15 +289,17 @@ export const appRouter = router({
             total: total.toFixed(2),
             paymentMethod: input.paymentMethod,
             status: "PAID",
-          });
-          const invoiceId = Number((invoiceResult as any)[0]?.insertId ?? 0);
+          }).returning({ id: invoices.id });
+          const invoiceId = createdInvoice?.id ?? 0;
+          if (!invoiceId) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "تعذر إنشاء الفاتورة." });
 
           for (const item of lineItems) {
             const updateResult = await tx
               .update(products)
               .set({ stockQuantity: item.newStock.toFixed(3) })
-              .where(and(eq(products.id, item.productId), eq(products.supermarketId, supermarketId), sql`${products.stockQuantity} >= ${item.quantity}`));
-            if (!Number((updateResult as any)[0]?.affectedRows ?? 0)) {
+              .where(and(eq(products.id, item.productId), eq(products.supermarketId, supermarketId), sql`${products.stockQuantity} >= ${item.quantity}`))
+              .returning({ id: products.id });
+            if (!updateResult[0]) {
               throw new TRPCError({ code: "CONFLICT", message: `تغير المخزون أثناء الحفظ: ${item.name}` });
             }
             await tx.insert(invoiceItems).values({
@@ -395,6 +399,24 @@ export const appRouter = router({
   }),
   branches: router({
     list: protectedProcedure.query(async ({ ctx }) => getTenantBranches(tenantId(ctx.user))),
+  }),
+  settings: router({
+    get: protectedProcedure.query(async ({ ctx }) => {
+      const store = await getTenantById(tenantId(ctx.user));
+      if (!store) throw new TRPCError({ code: "NOT_FOUND", message: "المتجر غير موجود." });
+      return store;
+    }),
+    updateStore: protectedProcedure
+      .input(z.object({ name: z.string().trim().min(2).max(180), phone: z.string().trim().max(40).nullable(), address: z.string().trim().max(500).nullable() }))
+      .mutation(async ({ ctx, input }) => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "قاعدة البيانات غير متاحة." });
+        requireRole(ctx.user.role, new Set(["OWNER", "ADMIN", "SUPER_ADMIN"]));
+        const [store] = await db.update(supermarkets).set({ name: input.name, phone: input.phone, address: input.address }).where(eq(supermarkets.id, tenantId(ctx.user))).returning();
+        if (!store) throw new TRPCError({ code: "NOT_FOUND", message: "المتجر غير موجود." });
+        await db.insert(auditLogs).values({ supermarketId: store.id, userId: ctx.user.id, action: "store.update", entity: "supermarket", entityId: String(store.id), metadata: { name: input.name } });
+        return store;
+      }),
   }),
   users: router({
     list: protectedProcedure.query(async ({ ctx }) => {

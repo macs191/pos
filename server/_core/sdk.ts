@@ -270,6 +270,33 @@ class SDKServer {
       }
     }
 
+    // Supabase Auth session fallback for the Vercel deployment.
+    // The service-role key is never sent to the browser; only the JWT secret
+    // is used server-side to verify the access token signature.
+    const authHeader = req.headers.authorization;
+    if (typeof authHeader === "string" && authHeader.startsWith("Bearer ") && ENV.supabaseJwtSecret) {
+      try {
+        const { payload } = await jwtVerify(authHeader.slice(7), new TextEncoder().encode(ENV.supabaseJwtSecret));
+        const openId = typeof payload.sub === "string" ? payload.sub : "";
+        if (openId) {
+          const signedInAt = new Date();
+          const email = typeof payload.email === "string" ? payload.email : null;
+          const metadata = payload.user_metadata as Record<string, unknown> | undefined;
+          await db.upsertUser({
+            openId,
+            email,
+            name: typeof metadata?.full_name === "string" ? metadata.full_name : email,
+            loginMethod: "supabase",
+            lastSignedIn: signedInAt,
+          });
+          const user = await db.getUserByOpenId(openId);
+          if (user) return user;
+        }
+      } catch (error) {
+        console.warn("[Auth] Supabase token verification failed", String(error));
+      }
+    }
+
     const session = await this.verifySession(sessionToken);
 
     if (!session) {
