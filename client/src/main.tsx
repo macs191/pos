@@ -8,6 +8,12 @@ import App from "./App";
 import { startLogin } from "./const";
 import "./index.css";
 
+if ("serviceWorker" in navigator && (window.isSecureContext || window.location.hostname === "localhost")) {
+  window.addEventListener("load", () => {
+    void navigator.serviceWorker.register("/sw.js");
+  });
+}
+
 const queryClient = new QueryClient();
 
 const redirectToLoginIfUnauthorized = (error: unknown) => {

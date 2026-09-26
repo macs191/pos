@@ -1,0 +1,14 @@
+{
+  "name": "سوقي | نقاط البيع",
+  "short_name": "سوقي",
+  "lang": "ar",
+  "dir": "rtl",
+  "start_url": "/pos",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#071723",
+  "theme_color": "#071723",
+  "description": "تطبيق نقاط بيع عربي سريع لإدارة المنتجات والمبيعات بالباركود.",
+  "categories": ["business", "shopping", "productivity"]
+}

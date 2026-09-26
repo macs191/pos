@@ -39,7 +39,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 
@@ -139,7 +139,7 @@ function PosView({ role, userId }: { role: string; userId: number }) {
   const [cart, setCart] = useState<CartLine[]>([]);
   const [barcode, setBarcode] = useState("");
   const [scanStatus, setScanStatus] = useState("بانتظار المسح التالي");
-  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(true);
   const scanInputRef = useRef<HTMLInputElement>(null);
   const queueRef = useRef<string[]>([]);
   const processingRef = useRef(false);
@@ -155,7 +155,7 @@ function PosView({ role, userId }: { role: string; userId: number }) {
     return () => window.removeEventListener("focus", focus);
   }, []);
 
-  const drainQueue = async () => {
+  const drainQueue = useCallback(async () => {
     if (processingRef.current) return;
     processingRef.current = true;
     setScanStatus("جاري إضافة المنتجات...");
@@ -177,7 +177,7 @@ function PosView({ role, userId }: { role: string; userId: number }) {
     }
     processingRef.current = false;
     setScanStatus("جاهز للمسح التالي");
-  };
+  }, [lookup]);
 
   const onBarcodeKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key !== "Enter") return;
@@ -220,12 +220,11 @@ function PosView({ role, userId }: { role: string; userId: number }) {
     setScanStatus(`تم حفظ الفاتورة · الإجمالي ${money(invoiceTotal)}`);
   };
 
-  const handleCameraDetected = (value: string) => {
-    setCameraOpen(false);
+  const handleCameraDetected = useCallback((value: string) => {
     setBarcode("");
     queueRef.current.push(value);
     void drainQueue();
-  };
+  }, [drainQueue]);
 
   return <div className="space-y-5">
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1.38fr)_minmax(340px,0.62fr)]">
@@ -260,12 +259,27 @@ function HealthRow({ label, value, color }: { label: string; value: string; colo
 
 function ProductsView() {
   const [search, setSearch] = useState("");
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
   const [form, setForm] = useState({ name: "", barcode: "", sellingPrice: "", stockQuantity: "", minimumStock: "5" });
   const input = useMemo(() => ({ search }), [search]);
   const products = trpc.products.list.useQuery(input, { retry: false });
-  const create = trpc.products.create.useMutation({ onSuccess: () => { toast.success("تمت إضافة المنتج"); setForm({ name: "", barcode: "", sellingPrice: "", stockQuantity: "", minimumStock: "5" }); void products.refetch(); }, onError: error => toast.error(error.message) });
-  const submit = (event: React.FormEvent) => { event.preventDefault(); create.mutate({ name: form.name, barcode: form.barcode, sellingPrice: Number(form.sellingPrice), costPrice: 0, stockQuantity: Number(form.stockQuantity || 0), minimumStock: Number(form.minimumStock || 5), unit: "قطعة" }); };
-  return <div className="space-y-5"><div className="grid gap-4 xl:grid-cols-[0.7fr_1.3fr]"><form onSubmit={submit} className="soft-shadow rounded-2xl border border-[#e0e9e6] bg-white p-5"><div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#e6f6f0] text-[#287e64]"><PackagePlus size={18} /></div><div><h3 className="font-extrabold text-[#29464e]">إضافة منتج سريع</h3><p className="text-[11px] text-[#8a9c9c]">الحقول الأساسية تكفي لبدء البيع</p></div></div><div className="mt-5 space-y-3"><Field label="اسم المنتج"><input required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="مثال: مياه معدنية" /></Field><Field label="الباركود"><input required value={form.barcode} onChange={e => setForm({ ...form, barcode: e.target.value })} placeholder="6221234567890" className="mono" /></Field><div className="grid grid-cols-2 gap-3"><Field label="سعر البيع"><input required min="0" step="0.01" type="number" value={form.sellingPrice} onChange={e => setForm({ ...form, sellingPrice: e.target.value })} placeholder="0.00" /></Field><Field label="المخزون"><input min="0" step="1" type="number" value={form.stockQuantity} onChange={e => setForm({ ...form, stockQuantity: e.target.value })} placeholder="0" /></Field></div><button disabled={create.isPending} className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-[#0f5d4d] py-3 text-sm font-extrabold text-white hover:bg-[#0b493c] disabled:opacity-50"><Plus size={16} /> {create.isPending ? "جارٍ الحفظ" : "حفظ المنتج"}</button></div></form><section className="soft-shadow rounded-2xl border border-[#e0e9e6] bg-white"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e8efed] px-5 py-4"><div><h3 className="font-extrabold text-[#29464e]">كتالوج المنتجات</h3><p className="mt-1 text-[11px] text-[#8a9c9c]">بحث سريع بالاسم أو الباركود أو SKU</p></div><div className="relative w-full max-w-xs"><Search className="absolute right-3 top-1/2 -translate-y-1/2 text-[#93a3a3]" size={16} /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="ابحث في المنتجات" className="w-full rounded-xl border border-[#dfe9e5] bg-[#f8fbfa] py-2.5 pr-9 pl-3 text-xs outline-none focus:border-[#77bca8]" /></div></div>{products.isLoading ? <div className="p-8 text-center text-xs text-[#829394]">جارٍ تحميل المنتجات...</div> : products.data?.length ? <div className="overflow-x-auto"><table className="w-full text-right"><thead className="bg-[#f8fbfa] text-[10px] font-extrabold text-[#88999a]"><tr><th className="px-5 py-3">المنتج</th><th className="px-5 py-3">الباركود</th><th className="px-5 py-3">السعر</th><th className="px-5 py-3">المخزون</th><th className="px-5 py-3">الحالة</th></tr></thead><tbody>{products.data.map(product => <tr key={product.id} className="border-t border-[#eef3f1] text-xs"><td className="px-5 py-3 font-extrabold text-[#34515a]">{product.name}</td><td className="mono px-5 py-3 text-[#819293]">{product.barcode}</td><td className="px-5 py-3 font-extrabold text-[#29464e]">{money(product.sellingPrice)}</td><td className="px-5 py-3 text-[#657d80]">{integer(product.stockQuantity)} {product.unit}</td><td className="px-5 py-3">{Number(product.stockQuantity) <= Number(product.minimumStock) ? <span className="rounded-full bg-[#fff3cf] px-2 py-1 text-[10px] font-bold text-[#9b7000]">مخزون منخفض</span> : <span className="rounded-full bg-[#e7f6f0] px-2 py-1 text-[10px] font-bold text-[#2a8064]">متاح</span>}</td></tr>)}</tbody></table></div> : <EmptyState icon={<Boxes size={20} />} title="لا توجد منتجات" body="أضف منتجك الأول ليبدأ الكاشير في استقبال عمليات المسح." />}</section></div></div>;
+  const duplicateLookup = trpc.products.lookupByBarcode.useMutation({
+    onSuccess: product => {
+      setEditingId(product.id);
+      setForm({ name: product.name, barcode: product.barcode, sellingPrice: String(product.sellingPrice), stockQuantity: String(product.stockQuantity), minimumStock: String(product.minimumStock) });
+      toast.info("هذا الباركود محفوظ بالفعل", { description: "تم فتح المنتج للتعديل مباشرة." });
+    },
+  });
+  const handleProductCamera = (value: string) => { setCameraOpen(false); setForm(current => ({ ...current, barcode: value })); duplicateLookup.mutate({ barcode: value }); };
+  const resetForm = () => { setEditingId(null); setForm({ name: "", barcode: "", sellingPrice: "", stockQuantity: "", minimumStock: "5" }); };
+  const create = trpc.products.create.useMutation({ onSuccess: () => { toast.success("تمت إضافة المنتج"); resetForm(); void products.refetch(); }, onError: error => toast.error(error.message) });
+  const update = trpc.products.update.useMutation({ onSuccess: () => { toast.success("تم تعديل المنتج"); resetForm(); void products.refetch(); }, onError: error => toast.error(error.message) });
+  const payload = { name: form.name, barcode: form.barcode, sellingPrice: Number(form.sellingPrice), costPrice: 0, stockQuantity: Number(form.stockQuantity || 0), minimumStock: Number(form.minimumStock || 5), unit: "قطعة" as const };
+  const submit = (event: React.FormEvent) => { event.preventDefault(); if (editingId) update.mutate({ ...payload, id: editingId }); else create.mutate(payload); };
+  const checkBarcode = () => { const value = form.barcode.trim(); if (value.length >= 3) duplicateLookup.mutate({ barcode: value }); };
+  const saving = create.isPending || update.isPending;
+  return <div className="space-y-5"><div className="grid gap-4 xl:grid-cols-[0.7fr_1.3fr]"><form onSubmit={submit} className="soft-shadow rounded-2xl border border-[#e0e9e6] bg-white p-5"><div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#e6f6f0] text-[#287e64]"><PackagePlus size={18} /></div><div><h3 className="font-extrabold text-[#29464e]">{editingId ? "تعديل المنتج المحفوظ" : "إضافة منتج سريع"}</h3><p className="text-[11px] text-[#8a9c9c]">امسح الباركود؛ إذا كان محفوظًا سيفتح للتعديل تلقائيًا</p></div></div><div className="mt-5 space-y-3"><Field label="اسم المنتج"><input required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="مثال: مياه معدنية" /></Field><Field label="الباركود"><div className="flex gap-2"><input required value={form.barcode} onChange={e => setForm({ ...form, barcode: e.target.value })} onBlur={checkBarcode} placeholder="6221234567890" className="mono min-w-0 flex-1" /><button type="button" onClick={() => setCameraOpen(true)} className="flex shrink-0 items-center gap-1 rounded-xl bg-[#0f5d4d] px-3 text-[11px] font-extrabold text-white"><Camera size={14} /> كاميرا</button></div></Field>{editingId && <div className="rounded-xl border border-[#f0dca6] bg-[#fff8e7] px-3 py-2 text-[11px] font-bold text-[#8c690f]">هذا المنتج محفوظ بالفعل. أي تعديل هنا سيحدّث السجل الموجود بدل إنشاء نسخة جديدة.</div>}<div className="grid grid-cols-2 gap-3"><Field label="سعر البيع"><input required min="0" step="0.01" type="number" value={form.sellingPrice} onChange={e => setForm({ ...form, sellingPrice: e.target.value })} placeholder="0.00" /></Field><Field label="المخزون"><input min="0" step="1" type="number" value={form.stockQuantity} onChange={e => setForm({ ...form, stockQuantity: e.target.value })} placeholder="0" /></Field></div><div className="flex gap-2"><button disabled={saving} className="mt-2 flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#0f5d4d] py-3 text-sm font-extrabold text-white hover:bg-[#0b493c] disabled:opacity-50"><Plus size={16} /> {saving ? "جارٍ الحفظ" : editingId ? "حفظ التعديل" : "حفظ المنتج"}</button>{editingId && <button type="button" onClick={resetForm} className="mt-2 rounded-xl border border-[#dbe5e1] px-4 text-xs font-bold text-[#617679]">إلغاء</button>}</div></div></form><section className="soft-shadow rounded-2xl border border-[#e0e9e6] bg-white"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e8efed] px-5 py-4"><div><h3 className="font-extrabold text-[#29464e]">كتالوج المنتجات</h3><p className="mt-1 text-[11px] text-[#8a9c9c]">بحث سريع بالاسم أو الباركود أو SKU</p></div><div className="relative w-full max-w-xs"><Search className="absolute right-3 top-1/2 -translate-y-1/2 text-[#93a3a3]" size={16} /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="ابحث في المنتجات" className="w-full rounded-xl border border-[#dfe9e5] bg-[#f8fbfa] py-2.5 pr-9 pl-3 text-xs outline-none focus:border-[#77bca8]" /></div></div>{products.isLoading ? <div className="p-8 text-center text-xs text-[#829394]">جارٍ تحميل المنتجات...</div> : products.data?.length ? <div className="overflow-x-auto"><table className="w-full text-right"><thead className="bg-[#f8fbfa] text-[10px] font-extrabold text-[#88999a]"><tr><th className="px-5 py-3">المنتج</th><th className="px-5 py-3">الباركود</th><th className="px-5 py-3">السعر</th><th className="px-5 py-3">المخزون</th><th className="px-5 py-3">الحالة</th></tr></thead><tbody>{products.data.map(product => <tr key={product.id} className="border-t border-[#eef3f1] text-xs"><td className="px-5 py-3 font-extrabold text-[#34515a]">{product.name}</td><td className="mono px-5 py-3 text-[#819293]">{product.barcode}</td><td className="px-5 py-3 font-extrabold text-[#29464e]">{money(product.sellingPrice)}</td><td className="px-5 py-3 text-[#657d80]">{integer(product.stockQuantity)} {product.unit}</td><td className="px-5 py-3">{Number(product.stockQuantity) <= Number(product.minimumStock) ? <span className="rounded-full bg-[#fff3cf] px-2 py-1 text-[10px] font-bold text-[#9b7000]">مخزون منخفض</span> : <span className="rounded-full bg-[#e7f6f0] px-2 py-1 text-[10px] font-bold text-[#2a8064]">متاح</span>}</td></tr>)}</tbody></table></div> : <EmptyState icon={<Boxes size={20} />} title="لا توجد منتجات" body="أضف منتجك الأول ليبدأ الكاشير في استقبال عمليات المسح." />}</section></div><BarcodeCameraScanner open={cameraOpen} onClose={() => setCameraOpen(false)} onDetected={handleProductCamera} /></div>;
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) { return <label className="block"><span className="mb-1.5 block text-[11px] font-extrabold text-[#597175]">{label}</span>{children}</label>; }
@@ -299,6 +313,18 @@ function SuperAdminView() {
   return <div className="space-y-5"><div className="rounded-2xl bg-[#071723] p-6 text-white"><div className="flex items-center gap-2 text-xs font-bold text-[#b8efdc]"><ShieldCheck size={15} /> منصة الإدارة العليا</div><h2 className="mt-2 text-2xl font-extrabold">مرحبًا بك في مركز التحكم</h2><p className="mt-1 text-xs text-[#94afb1]">نظرة مجمعة على الحسابات والاشتراكات والنشاط التشغيلي.</p></div><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{cards.map(card => <div key={card.label} className="soft-shadow rounded-2xl border border-[#e0e9e6] bg-white p-5"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#e8f4f0] text-[#267a60]">{card.icon}</div><div className="mt-4 text-2xl font-extrabold text-[#29464e]">{card.value ?? "—"}</div><div className="mt-1 text-xs font-semibold text-[#73888a]">{card.label}</div></div>)}</div><section className="soft-shadow rounded-2xl border border-[#e0e9e6] bg-white p-5"><h3 className="font-extrabold text-[#29464e]">حالة المنصة</h3><div className="mt-4 grid gap-3 sm:grid-cols-3"><HealthRow label="العزل بين المستأجرين" value="مفعل" color="green" /><HealthRow label="المصادقة" value="Manus OAuth" color="blue" /><HealthRow label="الفواتير الذرية" value="مفعل" color="green" /></div></section></div>;
 }
 
+function MobileBottomNav({ path, navigate }: { path: string; navigate: (path: string) => void }) {
+  const items = [
+    { path: "/pos", label: "البيع", icon: ShoppingCart },
+    { path: "/products", label: "المنتجات", icon: Boxes },
+    { path: "/inventory", label: "المخزون", icon: ClipboardList },
+    { path: "/invoices", label: "الفواتير", icon: Receipt },
+  ];
+  return <nav className="fixed inset-x-3 bottom-3 z-30 grid grid-cols-4 rounded-2xl border border-[#d7e6e0] bg-white/95 p-1.5 shadow-[0_12px_35px_rgba(21,55,61,0.18)] backdrop-blur lg:hidden" aria-label="التنقل السريع">
+    {items.map(item => { const Icon = item.icon; const active = path === item.path; return <button key={item.path} onClick={() => navigate(item.path)} className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl text-[10px] font-extrabold ${active ? "bg-[#b8efdc] text-[#08231e]" : "text-[#718688]"}`}><Icon size={18} /><span>{item.label}</span></button>; })}
+  </nav>;
+}
+
 export default function Home() {
   const { user, loading, isAuthenticated, logout } = useAuth();
   const [location, navigate] = useLocation();
@@ -312,5 +338,5 @@ export default function Home() {
   const title = section === "/pos" ? "نقطة البيع" : section === "/dashboard" ? "نظرة عامة" : section === "/products" ? "المنتجات" : section === "/inventory" ? "المخزون" : section === "/invoices" ? "الفواتير" : section === "/reports" ? "التقارير" : section === "/users" ? "المستخدمون" : section === "/branches" ? "الفروع" : section === "/subscriptions" ? "الاشتراك" : section === "/settings" ? "إعدادات المتجر" : section === "/super-admin" ? "الإدارة العليا" : current?.label || "المتجر";
   const subtitle = section === "/pos" ? "امسح، أضف، احفظ — بدون توقف" : section === "/dashboard" ? "ملخص أداء المتجر وحركة التشغيل" : "إدارة بيانات المتجر بصلاحيات واضحة";
   const view = section === "/pos" ? <PosView role={role} userId={user?.id || 0} /> : section === "/dashboard" ? <DashboardView metrics={metrics.data || bootstrap.data?.metrics} /> : section === "/products" ? <ProductsView /> : section === "/invoices" ? <InvoicesView /> : section === "/inventory" ? <InventoryView /> : section === "/users" ? <UsersView /> : section === "/settings" ? <SettingsView /> : section === "/super-admin" && role === "SUPER_ADMIN" ? <SuperAdminView /> : <DashboardView metrics={metrics.data || bootstrap.data?.metrics} />;
-  return <div className="flex min-h-screen bg-[#f2f6f4]" dir="rtl"><Sidebar path={section} navigate={navigate} role={role} onLogout={() => void logout()} /><main className="min-w-0 flex-1"><Header title={title} subtitle={subtitle} navigate={navigate} onLogout={() => void logout()} /><div className="container py-5 sm:py-7">{metrics.isError && section !== "/pos" ? <div className="mb-4 rounded-xl border border-[#f1d7b3] bg-[#fff8e9] px-4 py-3 text-xs font-semibold text-[#8b6500]">تعذر تحميل بعض الإحصاءات الآن، لكن يمكنك متابعة العمل من نقطة البيع.</div> : null}{view}</div></main></div>;
+  return <div className="flex min-h-screen bg-[#f2f6f4]" dir="rtl"><Sidebar path={section} navigate={navigate} role={role} onLogout={() => void logout()} /><main className="min-w-0 flex-1"><Header title={title} subtitle={subtitle} navigate={navigate} onLogout={() => void logout()} /><div className="container pb-24 pt-5 sm:py-7">{metrics.isError && section !== "/pos" ? <div className="mb-4 rounded-xl border border-[#f1d7b3] bg-[#fff8e9] px-4 py-3 text-xs font-semibold text-[#8b6500]">تعذر تحميل بعض الإحصاءات الآن، لكن يمكنك متابعة العمل من نقطة البيع.</div> : null}{view}</div></main><MobileBottomNav path={section} navigate={navigate} /></div>;
 }

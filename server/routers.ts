@@ -158,6 +158,43 @@ export const appRouter = router({
         });
         return { success: true };
       }),
+    update: protectedProcedure
+      .input(productInput.extend({ id: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        const supermarketId = tenantId(ctx.user);
+        requireRole(ctx.user.role, catalogRoles);
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "قاعدة البيانات غير متاحة." });
+        const result = await db
+          .update(products)
+          .set({
+            branchId: input.branchId ?? ctx.user.branchId ?? null,
+            categoryId: input.categoryId ?? null,
+            name: input.name,
+            barcode: input.barcode,
+            sku: input.sku ?? null,
+            brand: input.brand ?? null,
+            unit: input.unit,
+            sellingPrice: input.sellingPrice.toFixed(2),
+            costPrice: input.costPrice.toFixed(2),
+            stockQuantity: input.stockQuantity.toFixed(3),
+            minimumStock: input.minimumStock.toFixed(3),
+            description: input.description ?? null,
+          })
+          .where(and(eq(products.id, input.id), eq(products.supermarketId, supermarketId)));
+        if (!Number((result as any)[0]?.affectedRows ?? 0)) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "المنتج غير موجود." });
+        }
+        await db.insert(auditLogs).values({
+          supermarketId,
+          userId: ctx.user.id,
+          action: "product.update",
+          entity: "product",
+          entityId: String(input.id),
+          metadata: { barcode: input.barcode },
+        });
+        return { success: true, id: input.id };
+      }),
   }),
   categories: router({
     list: protectedProcedure.query(async ({ ctx }) => {

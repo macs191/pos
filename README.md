@@ -8,6 +8,8 @@ Arabic RTL supermarket point-of-sale and store operations dashboard focused on t
 - POS screen optimized for USB/Bluetooth keyboard-style barcode scanners.
 - Sequential barcode queue: rapid scans are processed one at a time without dropping input.
 - Phone camera barcode scanning through the rear camera, with permission/error states and direct queue insertion.
+- Android-first PWA shell: portrait standalone mode, install manifest, service-worker shell cache, mobile bottom navigation, and safe-area spacing.
+- POS opens the camera automatically and keeps scanning active; moving the barcode out of frame re-arms the reader for the next item.
 - Spoken Arabic invoice total after a successful save using the browser Speech Synthesis API.
 - Duplicate barcode protection at the tenant + database unique-index level.
 - Cart aggregation: scanning the same product increments quantity instead of creating a duplicate row.
@@ -17,6 +19,7 @@ Arabic RTL supermarket point-of-sale and store operations dashboard focused on t
 - Invoice history with search and print action.
 - Users, branches, subscription, settings, and super-admin navigation surfaces.
 - First authenticated user provisioning: supermarket, main branch, owner, free subscription, and plan limits.
+- Shared catalog within each supermarket tenant: authorized staff use the same product/customer data and can update an existing product by barcode instead of creating a duplicate.
 - Tenant-scoped procedures: all product, invoice, inventory, customer, branch, and user queries are filtered by `supermarketId`.
 - Role gates for `OWNER`, `ADMIN`, `MANAGER`, `CASHIER`, and `SUPER_ADMIN`.
 - Server-side validation with Zod and database-safe parameterized Drizzle queries.
@@ -88,6 +91,14 @@ Configured environment values are injected by the WebDev runtime. Never hardcode
 11. Use **Ctrl + P** in the invoice screen for browser printing; add thermal/A4 printer CSS and a print template before going live with a physical printer.
 
 Camera access requires HTTPS and a browser permission. The managed preview is HTTPS; on a local non-HTTPS origin, use the keyboard-style scanner or serve the app through a secure local tunnel.
+
+### Android installation
+
+Open the HTTPS app URL in Chrome on Android and choose **Add to Home screen / تثبيت التطبيق**. The app launches in portrait standalone mode at `/pos`, with the camera opened automatically for the active cashier session. The PWA shell is cacheable, but authenticated API requests and database data always remain network-backed and are never stored in the service-worker cache.
+
+### Shared data model
+
+Products, customers, invoices, stock movements, and users are linked by the `supermarketId` tenant. Authorized users within the same supermarket therefore see the same catalog and inventory. A product barcode is unique inside that supermarket; a duplicate barcode lookup opens the existing product for editing. Cross-tenant data is intentionally not shared, so one store cannot modify another store's catalog.
 
 ## Permissions
 
