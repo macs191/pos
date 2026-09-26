@@ -7,6 +7,8 @@ Arabic RTL supermarket point-of-sale and store operations dashboard focused on t
 - Arabic RTL operator dashboard with persistent navigation.
 - POS screen optimized for USB/Bluetooth keyboard-style barcode scanners.
 - Sequential barcode queue: rapid scans are processed one at a time without dropping input.
+- Phone camera barcode scanning through the rear camera, with permission/error states and direct queue insertion.
+- Spoken Arabic invoice total after a successful save using the browser Speech Synthesis API.
 - Duplicate barcode protection at the tenant + database unique-index level.
 - Cart aggregation: scanning the same product increments quantity instead of creating a duplicate row.
 - Atomic invoice creation transaction: invoice, invoice items, stock decrement, inventory movement, and audit log are committed together.
@@ -77,11 +79,15 @@ Configured environment values are injected by the WebDev runtime. Never hardcode
 2. Open **نقطة البيع**. The barcode input is focused automatically.
 3. Enter a product barcode followed by `Enter` to simulate a scanner.
 4. Send several barcode + Enter sequences quickly. The scan queue processes them sequentially.
-5. Repeat the same barcode. Quantity increments on the existing cart row.
-6. Send an unknown barcode. The cart is unchanged and a clear toast is shown.
-7. Press **إنشاء الفاتورة**. The transaction saves the invoice and snapshots, decreases stock, records `SALE`, and creates an audit log.
-8. Confirm the receipt under **الفواتير** and the alert under **المخزون** if a threshold is reached.
-9. Use **Ctrl + P** in the invoice screen for browser printing; add thermal/A4 printer CSS and a print template before going live with a physical printer.
+5. Press **فتح الكاميرا** from the barcode area, allow camera access, and hold a barcode inside the guide. The decoded value is inserted into the same sequential queue.
+6. Repeat the same barcode. Quantity increments on the existing cart row.
+7. Send an unknown barcode. The cart is unchanged and a clear toast is shown.
+8. Press **إنشاء الفاتورة**. The transaction saves the invoice and snapshots, decreases stock, records `SALE`, and creates an audit log.
+9. After save, the browser announces aloud: `تم حفظ الفاتورة. إجمالي الفاتورة 100.00 جنيه` in Arabic when speech synthesis is available.
+10. Confirm the receipt under **الفواتير** and the alert under **المخزون** if a threshold is reached.
+11. Use **Ctrl + P** in the invoice screen for browser printing; add thermal/A4 printer CSS and a print template before going live with a physical printer.
+
+Camera access requires HTTPS and a browser permission. The managed preview is HTTPS; on a local non-HTTPS origin, use the keyboard-style scanner or serve the app through a secure local tunnel.
 
 ## Permissions
 

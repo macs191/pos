@@ -2,6 +2,8 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { startLogin } from "@/const";
 import { trpc } from "@/lib/trpc";
 import { addProductToCart, cartSubtotal } from "@shared/pos";
+import { buildInvoiceAnnouncement } from "@shared/voice";
+import { BarcodeCameraScanner } from "@/components/BarcodeCameraScanner";
 import {
   Activity,
   ArrowDownLeft,
@@ -12,6 +14,7 @@ import {
   Building2,
   Check,
   ChevronLeft,
+  Camera,
   CircleAlert,
   ClipboardList,
   CreditCard,
@@ -136,6 +139,7 @@ function PosView({ role, userId }: { role: string; userId: number }) {
   const [cart, setCart] = useState<CartLine[]>([]);
   const [barcode, setBarcode] = useState("");
   const [scanStatus, setScanStatus] = useState("بانتظار المسح التالي");
+  const [cameraOpen, setCameraOpen] = useState(false);
   const scanInputRef = useRef<HTMLInputElement>(null);
   const queueRef = useRef<string[]>([]);
   const processingRef = useRef(false);
@@ -192,6 +196,7 @@ function PosView({ role, userId }: { role: string; userId: number }) {
     if (!canPay) { toast.error("لا تملك صلاحية إنشاء فاتورة."); return; }
     try {
       const result = await createInvoice.mutateAsync({ items: cart.map(item => ({ productId: item.id, quantity: item.qty })), discount: 0, tax: 0, paymentMethod: "CASH" });
+      announceInvoiceTotal(result.total);
       toast.success("تم حفظ الفاتورة بنجاح", { description: `${result.invoiceNumber} · ${money(result.total)}` });
       clearCart();
     } catch (error) {
@@ -200,11 +205,33 @@ function PosView({ role, userId }: { role: string; userId: number }) {
     }
   };
 
+  const announceInvoiceTotal = (invoiceTotal: number) => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+      setScanStatus(`تم حفظ الفاتورة · الإجمالي ${money(invoiceTotal)}`);
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const announcement = new SpeechSynthesisUtterance(buildInvoiceAnnouncement(invoiceTotal));
+    announcement.lang = "ar-EG";
+    announcement.rate = 0.88;
+    announcement.pitch = 1;
+    announcement.volume = 1;
+    window.speechSynthesis.speak(announcement);
+    setScanStatus(`تم حفظ الفاتورة · الإجمالي ${money(invoiceTotal)}`);
+  };
+
+  const handleCameraDetected = (value: string) => {
+    setCameraOpen(false);
+    setBarcode("");
+    queueRef.current.push(value);
+    void drainQueue();
+  };
+
   return <div className="space-y-5">
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1.38fr)_minmax(340px,0.62fr)]">
       <section className="soft-shadow overflow-hidden rounded-2xl border border-[#d9e6e0] bg-white">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e5edeb] px-5 py-4"><div><div className="flex items-center gap-2"><div className="h-2.5 w-2.5 animate-pulse rounded-full bg-[#36a77f]" /><h2 className="font-extrabold text-[#183741]">ماسح الباركود</h2></div><p className="mt-1 text-[11px] font-semibold text-[#809194]">امسح المنتجات بالتتابع دون لمس الشاشة</p></div><div className="flex items-center gap-2 rounded-lg bg-[#edf7f3] px-2.5 py-1.5 text-[10px] font-extrabold text-[#20765d]"><Zap size={13} /> معالجة فورية · {queueRef.current.length} في الانتظار</div></div>
-        <div className="relative bg-[#f8fcfa] p-5 sm:p-8"><div className="absolute inset-0 dot-grid" /><div className="relative"><label htmlFor="barcode" className="label-caps">Barcode input · جاهز</label><div className="mt-2 flex items-center gap-3 rounded-2xl border-2 border-[#54b393] bg-white px-4 py-4 shadow-[0_0_0_4px_rgba(84,179,147,0.1)]"><Search size={21} className="shrink-0 text-[#2e9a77]" /><input id="barcode" ref={scanInputRef} autoFocus value={barcode} onChange={event => setBarcode(event.target.value)} onKeyDown={onBarcodeKeyDown} placeholder="امسح الباركود هنا ثم اضغط Enter" className="mono min-w-0 flex-1 bg-transparent text-base font-semibold text-[#19383e] outline-none placeholder:font-sans placeholder:text-sm placeholder:text-[#a5b5b2]" /><kbd className="hidden rounded-md border border-[#dce8e3] bg-[#f3f8f6] px-2 py-1 text-[10px] font-bold text-[#718784] sm:inline">ENTER</kbd></div><div className="mt-3 flex items-center gap-2 text-[11px] font-semibold text-[#66807b]"><Activity size={14} className="text-[#3aa580]" /> {scanStatus}<span className="mr-auto text-[#9aa9a7]">جلسة الكاشير #{userId}</span></div></div></div>
+        <div className="relative bg-[#f8fcfa] p-5 sm:p-8"><div className="absolute inset-0 dot-grid" /><div className="relative"><div className="flex items-center justify-between gap-3"><label htmlFor="barcode" className="label-caps">Barcode input · جاهز</label><button onClick={() => setCameraOpen(true)} className="flex items-center gap-2 rounded-lg bg-[#0f5d4d] px-3 py-2 text-[11px] font-extrabold text-white hover:bg-[#0b493c]"><Camera size={15} /> فتح الكاميرا</button></div><div className="mt-2 flex items-center gap-3 rounded-2xl border-2 border-[#54b393] bg-white px-4 py-4 shadow-[0_0_0_4px_rgba(84,179,147,0.1)]"><Search size={21} className="shrink-0 text-[#2e9a77]" /><input id="barcode" ref={scanInputRef} autoFocus value={barcode} onChange={event => setBarcode(event.target.value)} onKeyDown={onBarcodeKeyDown} placeholder="امسح الباركود هنا ثم اضغط Enter" className="mono min-w-0 flex-1 bg-transparent text-base font-semibold text-[#19383e] outline-none placeholder:font-sans placeholder:text-sm placeholder:text-[#a5b5b2]" /><kbd className="hidden rounded-md border border-[#dce8e3] bg-[#f3f8f6] px-2 py-1 text-[10px] font-bold text-[#718784] sm:inline">ENTER</kbd></div><div className="mt-3 flex items-center gap-2 text-[11px] font-semibold text-[#66807b]"><Activity size={14} className="text-[#3aa580]" /> {scanStatus}<span className="mr-auto text-[#9aa9a7]">جلسة الكاشير #{userId}</span></div></div></div>
         <div className="flex items-center justify-between border-b border-[#e5edeb] px-5 py-3"><div className="flex items-center gap-2 text-sm font-extrabold text-[#304b52]"><ShoppingCart size={17} className="text-[#0f6e58]" /> السلة <span className="rounded-full bg-[#e6f5ef] px-2 py-0.5 text-[10px] text-[#267a60]">{cart.length} أصناف</span></div><button onClick={clearCart} disabled={!cart.length} className="text-[11px] font-bold text-[#ad5a59] hover:text-[#8d3437] disabled:opacity-30">تفريغ السلة</button></div>
         <div className="scroll-thin max-h-[360px] overflow-y-auto px-5 py-2">{cart.length === 0 ? <div className="flex min-h-[235px] flex-col items-center justify-center text-center"><div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#edf5f2] text-[#7ba49b]"><ShoppingCart size={25} /></div><div className="text-sm font-extrabold text-[#547077]">السلة فارغة</div><div className="mt-1 text-xs text-[#99a9a9]">ابدأ بمسح أول منتج لإضافته تلقائيًا</div></div> : cart.map(item => <div key={item.id} className="flex items-center gap-3 border-b border-[#edf2f0] py-3 last:border-0"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#eff7f4] text-[#267a60]"><Tag size={17} /></div><div className="min-w-0 flex-1"><div className="truncate text-sm font-extrabold text-[#29464f]">{item.name}</div><div className="mono mt-0.5 text-[10px] text-[#91a2a3]">{item.barcode}</div></div><div className="flex items-center gap-2 rounded-lg bg-[#f1f6f4] px-2.5 py-1.5"><span className="text-xs font-extrabold text-[#3e5b60]">{integer(item.qty)}</span><span className="text-[10px] text-[#8ba09e]">×</span></div><div className="w-24 text-left font-extrabold text-[#24444c]">{money(item.price * item.qty)}</div><button onClick={() => removeItem(item.id)} aria-label={`حذف ${item.name}`} className="text-[#aebcba] hover:text-[#bd4e51]"><Trash2 size={16} /></button></div>)}</div>
       </section>
@@ -214,7 +241,7 @@ function PosView({ role, userId }: { role: string; userId: number }) {
         <div className="border-t border-[#1c3b49] p-5"><button onClick={submitInvoice} disabled={createInvoice.isPending || !cart.length} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#b8efdc] px-4 py-3.5 text-sm font-extrabold text-[#08231e] shadow-[0_10px_25px_rgba(184,239,220,0.14)] hover:bg-[#d2faec] disabled:cursor-not-allowed disabled:opacity-40">{createInvoice.isPending ? "جارٍ حفظ الفاتورة..." : "إنشاء الفاتورة"}<ChevronLeft size={18} /></button><div className="mt-3 flex items-center justify-center gap-2 text-[10px] text-[#789397]"><Printer size={13} /> يمكن الطباعة بعد الحفظ · Ctrl + P</div></div>
       </aside>
     </div>
-    <div className="grid gap-4 sm:grid-cols-3"><div className="flex items-center gap-3 rounded-2xl border border-[#dce9e4] bg-white px-4 py-3"><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#fff3cf] text-[#a37400]"><Zap size={15} /></div><div><div className="text-xs font-extrabold text-[#38535a]">مسح متواصل</div><div className="text-[10px] text-[#8b9a9a]">Queue sequential processing</div></div></div><div className="flex items-center gap-3 rounded-2xl border border-[#dce9e4] bg-white px-4 py-3"><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#e6f6f0] text-[#287e64]"><ShieldCheck size={15} /></div><div><div className="text-xs font-extrabold text-[#38535a]">حفظ ذري</div><div className="text-[10px] text-[#8b9a9a]">Invoice + stock transaction</div></div></div><div className="flex items-center gap-3 rounded-2xl border border-[#dce9e4] bg-white px-4 py-3"><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#e8eef7] text-[#3d6793]"><History size={15} /></div><div><div className="text-xs font-extrabold text-[#38535a]">سجل كامل</div><div className="text-[10px] text-[#8b9a9a]">كل حركة قابلة للتتبع</div></div></div></div>
+    <div className="grid gap-4 sm:grid-cols-3"><div className="flex items-center gap-3 rounded-2xl border border-[#dce9e4] bg-white px-4 py-3"><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#fff3cf] text-[#a37400]"><Zap size={15} /></div><div><div className="text-xs font-extrabold text-[#38535a]">مسح متواصل</div><div className="text-[10px] text-[#8b9a9a]">Queue sequential processing</div></div></div><div className="flex items-center gap-3 rounded-2xl border border-[#dce9e4] bg-white px-4 py-3"><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#e6f6f0] text-[#287e64]"><ShieldCheck size={15} /></div><div><div className="text-xs font-extrabold text-[#38535a]">حفظ ذري</div><div className="text-[10px] text-[#8b9a9a]">Invoice + stock transaction</div></div></div><div className="flex items-center gap-3 rounded-2xl border border-[#dce9e4] bg-white px-4 py-3"><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#e8eef7] text-[#3d6793]"><History size={15} /></div><div><div className="text-xs font-extrabold text-[#38535a]">سجل كامل</div><div className="text-[10px] text-[#8b9a9a]">كل حركة قابلة للتتبع</div></div></div></div><BarcodeCameraScanner open={cameraOpen} onClose={() => setCameraOpen(false)} onDetected={handleCameraDetected} />
   </div>;
 }
 

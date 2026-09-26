@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { addProductToCart, cartSubtotal, invoiceTotal } from "../shared/pos";
+import { buildInvoiceAnnouncement } from "../shared/voice";
 
 describe("POS cart logic", () => {
   const product = {
@@ -23,5 +24,11 @@ describe("POS cart logic", () => {
   it("keeps invoice totals non-negative after discounts", () => {
     expect(invoiceTotal(100, 20, 5)).toBe(85);
     expect(invoiceTotal(100, 120, 0)).toBe(0);
+  });
+
+  it("builds a spoken Arabic invoice total announcement", () => {
+    expect(buildInvoiceAnnouncement(100)).toContain("إجمالي الفاتورة");
+    expect(buildInvoiceAnnouncement(100)).toContain("١٠٠٫٠٠");
+    expect(buildInvoiceAnnouncement(100)).toContain("جنيه");
   });
 });
