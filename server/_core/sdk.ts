@@ -290,7 +290,10 @@ class SDKServer {
             lastSignedIn: signedInAt,
           });
           const user = await db.getUserByOpenId(openId);
-          if (user) return user;
+          if (user) {
+            if (!user.isActive) throw ForbiddenError("User account is inactive");
+            return user;
+          }
         }
       } catch (error) {
         console.warn("[Auth] Supabase token verification failed", String(error));
@@ -336,6 +339,10 @@ class SDKServer {
 
     if (!user) {
       throw ForbiddenError("User not found");
+    }
+
+    if (!user.isActive) {
+      throw ForbiddenError("User account is inactive");
     }
 
     await db.upsertUser({

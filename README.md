@@ -18,7 +18,9 @@ Arabic RTL supermarket point-of-sale and store operations dashboard focused on t
 - Low-stock dashboard and inventory alert screen.
 - Invoice history with search and print action.
 - Users, branches, subscription, settings, and super-admin navigation surfaces.
-- First authenticated user provisioning: supermarket, main branch, owner, free subscription, and plan limits.
+- First registered user provisioning: supermarket, main branch, owner, and a 15-day free subscription.
+- Supabase Auth email/password login; disable Supabase **Confirm email** to let new users enter immediately without email messages.
+- Super Admin controls for stores, subscriptions, users, roles, activation, products, categories, and invoice status.
 - Shared catalog within each supermarket tenant: authorized staff use the same product/customer data and can update an existing product by barcode instead of creating a duplicate.
 - Tenant-scoped procedures: all product, invoice, inventory, customer, branch, and user queries are filtered by `supermarketId`.
 - Role gates for `OWNER`, `ADMIN`, `MANAGER`, `CASHIER`, and `SUPER_ADMIN`.
@@ -27,14 +29,14 @@ Arabic RTL supermarket point-of-sale and store operations dashboard focused on t
 
 ## Important runtime note
 
-This project was initialized in the current WebDev environment using its supported `web-db-user` scaffold. That scaffold provides:
+The project runs as a Vercel-compatible React/Express application with Supabase services:
 
 - React + Vite + TypeScript + Tailwind
 - Express + tRPC server procedures
-- Drizzle ORM over the managed MySQL-compatible TiDB database
-- Manus OAuth session authentication
+- Drizzle ORM over Supabase PostgreSQL
+- Supabase Auth access tokens forwarded to the tRPC API
 
-The original brief named Next.js, Supabase PostgreSQL, Prisma, Supabase Auth, and Vercel. Those are not the database/auth/deployment primitives exposed by this session's WebDev runtime, so this implementation uses the supported managed equivalents rather than pretending those services are connected. The business model and tenant boundaries are kept adapter-friendly; a later migration to Supabase/Prisma can use the same table concepts and procedure contracts.
+The frontend is a Vite PWA rather than Next.js, but it is configured for Vercel static output plus serverless API functions.
 
 ## Local development
 
@@ -52,7 +54,7 @@ Schema source:
 
 ```text
 drizzle/schema.ts
-drizzle/migrations/
+drizzle-pg/
 ```
 
 Generate migrations after schema edits:
@@ -61,20 +63,22 @@ Generate migrations after schema edits:
 pnpm drizzle-kit generate
 ```
 
-The initial migration was reviewed and applied to the managed TiDB database. The JSON columns (`users.permissions`, `subscription_plans.features`, and `audit_logs.metadata`) are nullable because the managed TiDB version rejects JSON defaults; server code treats missing values as empty collections/metadata.
+The PostgreSQL baseline migration is in `drizzle-pg/0000_complex_jocasta.sql`. Apply it to Supabase if the tables do not already exist.
 
 For future schema changes, use the project migration workflow and inspect the generated SQL before applying it. Do not insert test data through migration tooling.
 
 ## Authentication and first-login provisioning
 
-The scaffold uses Manus OAuth and the existing server session cookie. When an authenticated user is first seen, the server provisions:
+Supabase Auth handles email/password sessions. When a newly registered user is first seen by the API, the server provisions:
 
 1. A supermarket tenant.
 2. A main branch.
-3. An `OWNER` user record (or `SUPER_ADMIN` for the configured owner open ID).
-4. A free plan and active subscription.
+3. An `OWNER` user record (or `SUPER_ADMIN` when the email matches `OWNER_EMAIL`).
+4. A free plan and active subscription ending 15 days after registration.
 
-Configured environment values are injected by the WebDev runtime. Never hardcode `JWT_SECRET`, OAuth secrets, database credentials, or service keys. Only variables explicitly prefixed `VITE_` may be exposed to the browser.
+Required Vercel environment variables are `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_JWT_SECRET`, `POSTGRES_PRISMA_URL`, and `OWNER_EMAIL`. Never expose `SUPABASE_SERVICE_ROLE_KEY` or database passwords to the browser.
+
+In Supabase Dashboard, open **Authentication → Providers → Email** and turn **Confirm email** off. This prevents confirmation messages while keeping password login and Admin security intact.
 
 ## POS verification checklist
 
@@ -105,7 +109,7 @@ Products, customers, invoices, stock movements, and users are linked by the `sup
 - `CASHIER`: POS and invoice creation; no product price editing or user management.
 - `MANAGER`: POS, invoices, inventory adjustment, and operational reports.
 - `ADMIN` / `OWNER`: catalog and price management plus store operations.
-- `SUPER_ADMIN`: platform-level overview.
+- `SUPER_ADMIN`: complete platform-level control of stores, subscriptions, users, products, categories, and invoice status.
 
 Every mutation validates the authenticated session, derives the tenant from the session user, and applies the tenant predicate in the database query. Client-provided tenant IDs are not accepted by the core POS mutations.
 

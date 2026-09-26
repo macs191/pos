@@ -27,6 +27,7 @@ import {
   getDb,
   getTenantBranches,
   getTenantById,
+  getTenantSubscription,
 } from "./db";
 
 const catalogRoles = new Set(["OWNER", "ADMIN", "SUPER_ADMIN"]);
@@ -400,6 +401,9 @@ export const appRouter = router({
   branches: router({
     list: protectedProcedure.query(async ({ ctx }) => getTenantBranches(tenantId(ctx.user))),
   }),
+  subscription: router({
+    current: protectedProcedure.query(async ({ ctx }) => getTenantSubscription(tenantId(ctx.user))),
+  }),
   settings: router({
     get: protectedProcedure.query(async ({ ctx }) => {
       const store = await getTenantById(tenantId(ctx.user));
@@ -451,6 +455,87 @@ export const appRouter = router({
       if (!db) return [];
       return db.select().from(subscriptionPlans).where(eq(subscriptionPlans.isActive, true)).orderBy(subscriptionPlans.price);
     }),
+    accounts: protectedProcedure.query(async ({ ctx }) => {
+      requireRole(ctx.user.role, new Set(["SUPER_ADMIN"]));
+      const db = await getDb();
+      if (!db) return [];
+      const stores = await db.select().from(supermarkets).orderBy(desc(supermarkets.createdAt));
+      return Promise.all(stores.map(async store => ({ store, access: await getTenantSubscription(store.id) })));
+    }),
+    users: protectedProcedure.query(async ({ ctx }) => {
+      requireRole(ctx.user.role, new Set(["SUPER_ADMIN"]));
+      const db = await getDb();
+      if (!db) return [];
+      return db.select({ id: users.id, name: users.name, email: users.email, role: users.role, isActive: users.isActive, supermarketId: users.supermarketId, createdAt: users.createdAt }).from(users).orderBy(desc(users.createdAt)).limit(500);
+    }),
+    setUserRole: protectedProcedure
+      .input(z.object({ userId: z.number().int().positive(), role: z.enum(["OWNER", "ADMIN", "MANAGER", "CASHIER", "SUPER_ADMIN"]) }))
+      .mutation(async ({ ctx, input }) => {
+        requireRole(ctx.user.role, new Set(["SUPER_ADMIN"]));
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "قاعدة البيانات غير متاحة." });
+        const [updated] = await db.update(users).set({ role: input.role }).where(eq(users.id, input.userId)).returning({ id: users.id, role: users.role });
+        if (!updated) throw new TRPCError({ code: "NOT_FOUND", message: "المستخدم غير موجود." });
+        return updated;
+      }),
+    setUserActive: protectedProcedure
+      .input(z.object({ userId: z.number().int().positive(), isActive: z.boolean() }))
+      .mutation(async ({ ctx, input }) => {
+        requireRole(ctx.user.role, new Set(["SUPER_ADMIN"]));
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "قاعدة البيانات غير متاحة." });
+        const [updated] = await db.update(users).set({ isActive: input.isActive }).where(eq(users.id, input.userId)).returning({ id: users.id, isActive: users.isActive });
+        if (!updated) throw new TRPCError({ code: "NOT_FOUND", message: "المستخدم غير موجود." });
+        return updated;
+      }),
+    setSubscription: protectedProcedure
+      .input(z.object({ supermarketId: z.number().int().positive(), status: z.enum(["ACTIVE", "PAUSED", "CANCELED"]), endDate: z.coerce.date().nullable() }))
+      .mutation(async ({ ctx, input }) => {
+        requireRole(ctx.user.role, new Set(["SUPER_ADMIN"]));
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "قاعدة البيانات غير متاحة." });
+        const [updated] = await db.update(subscriptions).set({ status: input.status, endDate: input.endDate }).where(eq(subscriptions.supermarketId, input.supermarketId)).returning({ id: subscriptions.id, status: subscriptions.status, endDate: subscriptions.endDate });
+        if (!updated) throw new TRPCError({ code: "NOT_FOUND", message: "اشتراك المتجر غير موجود." });
+        return updated;
+      }),
+    products: protectedProcedure.query(async ({ ctx }) => {
+      requireRole(ctx.user.role, new Set(["SUPER_ADMIN"]));
+      const db = await getDb();
+      if (!db) return [];
+      return db.select().from(products).orderBy(desc(products.updatedAt)).limit(1000);
+    }),
+    setProductActive: protectedProcedure
+      .input(z.object({ productId: z.number().int().positive(), isActive: z.boolean() }))
+      .mutation(async ({ ctx, input }) => {
+        requireRole(ctx.user.role, new Set(["SUPER_ADMIN"]));
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "قاعدة البيانات غير متاحة." });
+        const [updated] = await db.update(products).set({ isActive: input.isActive }).where(eq(products.id, input.productId)).returning({ id: products.id, isActive: products.isActive });
+        if (!updated) throw new TRPCError({ code: "NOT_FOUND", message: "المنتج غير موجود." });
+        return updated;
+      }),
+    categories: protectedProcedure.query(async ({ ctx }) => {
+      requireRole(ctx.user.role, new Set(["SUPER_ADMIN"]));
+      const db = await getDb();
+      if (!db) return [];
+      return db.select().from(categories).orderBy(desc(categories.createdAt)).limit(1000);
+    }),
+    invoices: protectedProcedure.query(async ({ ctx }) => {
+      requireRole(ctx.user.role, new Set(["SUPER_ADMIN"]));
+      const db = await getDb();
+      if (!db) return [];
+      return db.select().from(invoices).orderBy(desc(invoices.createdAt)).limit(1000);
+    }),
+    setInvoiceStatus: protectedProcedure
+      .input(z.object({ invoiceId: z.number().int().positive(), status: z.enum(["PAID", "VOID", "REFUNDED"]) }))
+      .mutation(async ({ ctx, input }) => {
+        requireRole(ctx.user.role, new Set(["SUPER_ADMIN"]));
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "قاعدة البيانات غير متاحة." });
+        const [updated] = await db.update(invoices).set({ status: input.status }).where(eq(invoices.id, input.invoiceId)).returning({ id: invoices.id, status: invoices.status });
+        if (!updated) throw new TRPCError({ code: "NOT_FOUND", message: "الفاتورة غير موجودة." });
+        return updated;
+      }),
   }),
 });
 

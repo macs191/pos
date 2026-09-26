@@ -15,6 +15,7 @@ import { ENV } from "./_core/env";
 
 let _pool: Pool | null = null;
 let _db: ReturnType<typeof drizzle> | null = null;
+const TRIAL_DAYS = 15;
 
 function connectionString() {
   return process.env.POSTGRES_PRISMA_URL || process.env.POSTGRES_URL || process.env.POSTGRES_URL_NON_POOLING || process.env.DATABASE_URL || "";
@@ -97,7 +98,7 @@ async function provisionTenantForUser(user: InsertUser) {
         supermarketId,
         planId: plan.id,
         status: "ACTIVE",
-        endDate: null,
+        endDate: new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000),
       });
     }
   });
@@ -192,4 +193,21 @@ export async function getTenantById(supermarketId: number) {
   if (!db) return undefined;
   const result = await db.select().from(supermarkets).where(eq(supermarkets.id, supermarketId)).limit(1);
   return result[0];
+}
+
+export async function getTenantSubscription(supermarketId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db
+    .select({ subscription: subscriptions, plan: subscriptionPlans })
+    .from(subscriptions)
+    .leftJoin(subscriptionPlans, eq(subscriptionPlans.id, subscriptions.planId))
+    .where(eq(subscriptions.supermarketId, supermarketId))
+    .orderBy(desc(subscriptions.createdAt))
+    .limit(1);
+  const row = result[0];
+  if (!row?.subscription) return null;
+  const subscription = row.subscription;
+  const effectiveEnd = subscription.endDate ?? new Date(subscription.createdAt.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
+  return { subscription, plan: row.plan, effectiveEnd, isActive: subscription.status === "ACTIVE" && effectiveEnd.getTime() > Date.now() };
 }
