@@ -19,7 +19,9 @@ export function useAuth() {
     const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setHasSession(Boolean(nextSession));
       setSessionReady(true);
-      void utils.auth.me.invalidate();
+      // Supabase holds an internal auth lock while invoking this callback.
+      // Defer tRPC invalidation because its headers() calls getSession().
+      window.setTimeout(() => { void utils.auth.me.invalidate(); }, 0);
     });
     return () => { active = false; listener.subscription.unsubscribe(); };
   }, [utils]);
@@ -33,14 +35,18 @@ export function useAuth() {
 
   const signIn = useCallback(async (email: string, password: string) => {
     if (!supabase) throw new Error("إعدادات Supabase غير موجودة في Vercel.");
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
+    setHasSession(Boolean(data.session));
+    setSessionReady(true);
   }, []);
 
   const signUp = useCallback(async (email: string, password: string, fullName: string) => {
     if (!supabase) throw new Error("إعدادات Supabase غير موجودة في Vercel.");
-    const { error } = await supabase.auth.signUp({ email, password, options: { data: { full_name: fullName } } });
+    const { data, error } = await supabase.auth.signUp({ email, password, options: { data: { full_name: fullName } } });
     if (error) throw error;
+    setHasSession(Boolean(data.session));
+    setSessionReady(true);
   }, []);
 
   const logout = useCallback(async () => {
@@ -57,6 +63,7 @@ export function useAuth() {
     user: meQuery.data ?? null,
     loading: !sessionReady || (hasSession && meQuery.isLoading) || logoutMutation.isPending,
     error: meQuery.error ?? logoutMutation.error ?? null,
+    sessionIssue: hasSession && !meQuery.isLoading && !meQuery.data ? "تم تسجيل الدخول في Supabase، لكن تعذر ربط الحساب بالموقع. راجع متغيرات Supabase في Vercel." : null,
     isAuthenticated: Boolean(meQuery.data),
   }), [hasSession, logoutMutation.error, logoutMutation.isPending, meQuery.data, meQuery.error, meQuery.isLoading, sessionReady]);
 

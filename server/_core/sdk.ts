@@ -1,6 +1,7 @@
 import { AXIOS_TIMEOUT_MS, COOKIE_NAME, ONE_YEAR_MS, decodeOAuthState } from "@shared/const";
 import { ForbiddenError } from "@shared/_core/errors";
 import axios, { type AxiosInstance } from "axios";
+import { createClient } from "@supabase/supabase-js";
 import { parse as parseCookieHeader } from "cookie";
 import type { Request } from "express";
 import { SignJWT, jwtVerify } from "jose";
@@ -80,6 +81,10 @@ const createOAuthHttpClient = (): AxiosInstance =>
     baseURL: ENV.oAuthServerUrl,
     timeout: AXIOS_TIMEOUT_MS,
   });
+
+const supabaseAuthClient = ENV.supabaseUrl && ENV.supabaseAnonKey
+  ? createClient(ENV.supabaseUrl, ENV.supabaseAnonKey, { auth: { persistSession: false, autoRefreshToken: false } })
+  : null;
 
 class SDKServer {
   private readonly client: AxiosInstance;
@@ -270,13 +275,40 @@ class SDKServer {
       }
     }
 
-    // Supabase Auth session fallback for the Vercel deployment.
-    // The service-role key is never sent to the browser; only the JWT secret
-    // is used server-side to verify the access token signature.
+    // Supabase Auth validation for the Vercel deployment. Prefer the official
+    // getUser API so projects using newer signing keys work too.
     const authHeader = req.headers.authorization;
-    if (typeof authHeader === "string" && authHeader.startsWith("Bearer ") && ENV.supabaseJwtSecret) {
+    if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
+      const bearerToken = authHeader.slice(7);
+      if (supabaseAuthClient) {
+        try {
+          const { data, error } = await supabaseAuthClient.auth.getUser(bearerToken);
+          if (!error && data.user) {
+            const metadata = data.user.user_metadata as Record<string, unknown> | undefined;
+            await db.upsertUser({
+              openId: data.user.id,
+              email: data.user.email ?? null,
+              name: typeof metadata?.full_name === "string" ? metadata.full_name : data.user.email ?? null,
+              loginMethod: "supabase",
+              lastSignedIn: new Date(),
+            });
+            const user = await db.getUserByOpenId(data.user.id);
+            if (user) {
+              if (!user.isActive) throw ForbiddenError("User account is inactive");
+              return user;
+            }
+          }
+        } catch (error) {
+          console.warn("[Auth] Supabase getUser validation failed", String(error));
+        }
+      }
+
+      // Fallback for self-contained legacy Supabase JWT validation.
+      if (!ENV.supabaseJwtSecret) {
+        throw ForbiddenError("Invalid Supabase session");
+      }
       try {
-        const { payload } = await jwtVerify(authHeader.slice(7), new TextEncoder().encode(ENV.supabaseJwtSecret));
+        const { payload } = await jwtVerify(bearerToken, new TextEncoder().encode(ENV.supabaseJwtSecret));
         const openId = typeof payload.sub === "string" ? payload.sub : "";
         if (openId) {
           const signedInAt = new Date();

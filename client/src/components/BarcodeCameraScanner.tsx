@@ -32,7 +32,11 @@ export function BarcodeCameraScanner({ open, onClose, onDetected }: BarcodeCamer
       try {
         const { BrowserMultiFormatReader } = await import("@zxing/browser");
         if (cancelled) return;
-        const reader = new BrowserMultiFormatReader();
+        const reader = new BrowserMultiFormatReader(undefined, {
+          delayBetweenScanAttempts: 80,
+          delayBetweenScanSuccess: 120,
+          tryPlayVideoTimeout: 5000,
+        });
         const controls = await reader.decodeFromConstraints(
           {
             audio: false,

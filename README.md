@@ -80,6 +80,8 @@ Required Vercel environment variables are `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `
 
 In Supabase Dashboard, open **Authentication → Providers → Email** and turn **Confirm email** off. This prevents confirmation messages while keeping password login and Admin security intact.
 
+If a user can register but cannot enter, confirm that the same deployment has `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_JWT_SECRET`, then redeploy Vercel. The browser session is now validated server-side through Supabase `getUser`, with JWT verification as a fallback.
+
 ## POS verification checklist
 
 1. Sign in through the **تسجيل الدخول** action.
