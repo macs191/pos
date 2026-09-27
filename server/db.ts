@@ -182,6 +182,16 @@ export async function findProductByBarcode(supermarketId: number, barcode: strin
   return result[0];
 }
 
+export async function findProductsByName(supermarketId: number, name: string) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(products).where(and(
+    eq(products.supermarketId, supermarketId),
+    eq(products.isActive, true),
+    like(products.name, `%${name.trim()}%`),
+  )).orderBy(desc(products.updatedAt)).limit(5);
+}
+
 export async function getTenantBranches(supermarketId: number) {
   const db = await getDb();
   if (!db) return [];

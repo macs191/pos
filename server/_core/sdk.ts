@@ -3,7 +3,7 @@ import { ForbiddenError } from "@shared/_core/errors";
 import axios, { type AxiosInstance } from "axios";
 import { createClient } from "@supabase/supabase-js";
 import { parse as parseCookieHeader } from "cookie";
-import type { Request } from "express";
+import type { Request } from "express-serve-static-core";
 import { SignJWT, jwtVerify } from "jose";
 import type { User } from "../../drizzle/schema";
 import * as db from "../db";

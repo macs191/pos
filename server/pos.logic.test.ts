@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { addProductToCart, cartSubtotal, invoiceTotal } from "../shared/pos";
-import { buildInvoiceAnnouncement } from "../shared/voice";
+import { buildInvoiceAnnouncement, isNewInvoiceVoiceCommand, isSaveVoiceCommand, parseVoiceProductPhrase } from "../shared/voice";
 
 describe("POS cart logic", () => {
   const product = {
@@ -30,5 +30,11 @@ describe("POS cart logic", () => {
     expect(buildInvoiceAnnouncement(100)).toContain("إجمالي الفاتورة");
     expect(buildInvoiceAnnouncement(100)).toContain("١٠٠٫٠٠");
     expect(buildInvoiceAnnouncement(100)).toContain("جنيه");
+  });
+
+  it("parses Arabic product name, spoken price, and quantity", () => {
+    expect(parseVoiceProductPhrase("أريد مياه معدنية بخمسة عدد ثلاثة")).toMatchObject({ name: "مياه معدنية", price: 5, quantity: 3 });
+    expect(isNewInvoiceVoiceCommand("اعمل فاتورة جديدة")).toBe(true);
+    expect(isSaveVoiceCommand("احفظ")).toBe(true);
   });
 });

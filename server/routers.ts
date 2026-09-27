@@ -23,6 +23,7 @@ import {
 import {
   findProductByBarcode,
   findProducts,
+  findProductsByName,
   getDashboardMetrics,
   getDb,
   getTenantBranches,
@@ -96,6 +97,9 @@ export const appRouter = router({
         }
         return product;
       }),
+    lookupByName: protectedProcedure
+      .input(z.object({ name: z.string().trim().min(2).max(200) }))
+      .mutation(async ({ ctx, input }) => findProductsByName(tenantId(ctx.user), input.name)),
     create: protectedProcedure.input(productInput).mutation(async ({ ctx, input }) => {
       const supermarketId = tenantId(ctx.user);
       requireRole(ctx.user.role, catalogRoles);

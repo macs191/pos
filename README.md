@@ -82,6 +82,16 @@ In Supabase Dashboard, open **Authentication → Providers → Email** and turn 
 
 If a user can register but cannot enter, confirm that the same deployment has `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_JWT_SECRET`, then redeploy Vercel. The browser session is now validated server-side through Supabase `getUser`, with JWT verification as a fallback.
 
+### التحكم الصوتي
+
+من شاشة نقطة البيع اضغط **تحكم صوتي** ثم استخدم أوامر عربية مثل:
+
+- «اعمل فاتورة جديدة» لبدء فاتورة.
+- «مياه معدنية بخمسة» أو «شيبسي بالطماطم عدد ثلاثة» لإضافة منتج موجود بالاسم.
+- «احفظ» لحفظ الفاتورة ونطق الإجمالي بصوت عربي.
+
+ومن شاشة المنتجات، امسح باركودًا جديدًا؛ سيطلب التطبيق اسم المنتج ثم السعر، وبعدها قل «احفظ». الميزة تستخدم Web Speech API وتعمل بأفضل صورة في Chrome على Android مع السماح بالميكروفون؛ يظل إدخال النص والكاميرا متاحين كبديل.
+
 ## POS verification checklist
 
 1. Sign in through the **تسجيل الدخول** action.

@@ -1,8 +1,9 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { addProductToCart, cartSubtotal } from "@shared/pos";
-import { buildInvoiceAnnouncement } from "@shared/voice";
+import { buildInvoiceAnnouncement, isNewInvoiceVoiceCommand, isSaveVoiceCommand, parseVoiceProductPhrase } from "@shared/voice";
 import { BarcodeCameraScanner } from "@/components/BarcodeCameraScanner";
+import { VoiceCommandButton, speakArabic } from "@/components/VoiceCommandButton";
 import {
   Activity,
   ArrowDownLeft,
@@ -161,7 +162,10 @@ function PosView({ role, userId }: { role: string; userId: number }) {
   const queueRef = useRef<string[]>([]);
   const processingRef = useRef(false);
   const lookup = trpc.products.lookupByBarcode.useMutation();
+  const voiceLookup = trpc.products.lookupByName.useMutation();
   const createInvoice = trpc.pos.createInvoice.useMutation();
+  const [voiceInvoiceMode, setVoiceInvoiceMode] = useState(false);
+  const [pendingVoiceName, setPendingVoiceName] = useState<string | null>(null);
   const canPay = ["OWNER", "ADMIN", "MANAGER", "CASHIER", "SUPER_ADMIN"].includes(role);
   const total = cartSubtotal(cart);
 
@@ -243,7 +247,46 @@ function PosView({ role, userId }: { role: string; userId: number }) {
     void drainQueue();
   }, [drainQueue]);
 
-  return <div className="space-y-5">
+  const handleVoiceCommand = useCallback(async (transcript: string) => {
+    if (isNewInvoiceVoiceCommand(transcript)) {
+      clearCart();
+      setVoiceInvoiceMode(true);
+      setPendingVoiceName(null);
+      speakArabic("تم فتح فاتورة جديدة. قل اسم المنتج، ويمكنك ذكر السعر والكمية.");
+      return;
+    }
+    if (isSaveVoiceCommand(transcript) && voiceInvoiceMode) {
+      await submitInvoice();
+      setVoiceInvoiceMode(false);
+      return;
+    }
+    const phrase = parseVoiceProductPhrase(transcript);
+    const spokenName = pendingVoiceName ?? phrase.name;
+    if (!spokenName || spokenName.length < 2 || /^(خمسة|عشرة|واحد|اثنين|ثلاثة|أربعة|اربعة|ستة|سبعة|ثمانية|تسعة)$/i.test(spokenName)) {
+      speakArabic("قل اسم المنتج، مثل مياه معدنية بخمسة جنيه.");
+      return;
+    }
+    setPendingVoiceName(null);
+    try {
+      const matches = await voiceLookup.mutateAsync({ name: spokenName });
+      if (matches.length === 0) {
+        speakArabic(`لم أجد منتج ${spokenName}. أضفه أولًا من شاشة المنتجات بالباركود.`);
+        return;
+      }
+      if (matches.length > 1) {
+        speakArabic("وجدت أكثر من منتج بهذا الاسم. استخدم الباركود أو قل الاسم بشكل أدق.");
+        return;
+      }
+      const product = matches[0];
+      for (let index = 0; index < phrase.quantity; index += 1) setCart(current => addProductToCart(current, product));
+      setVoiceInvoiceMode(true);
+      speakArabic(`تمت إضافة ${product.name}، الكمية ${phrase.quantity}. قل منتجًا آخر أو قل احفظ.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "تعذر البحث عن المنتج بالصوت.");
+    }
+  }, [clearCart, pendingVoiceName, submitInvoice, voiceInvoiceMode, voiceLookup]);
+
+  return <div className="space-y-5"><div className="flex items-center justify-between rounded-2xl border border-[#dce9e4] bg-white px-4 py-3"><div><div className="text-sm font-extrabold text-[#29464e]">تحكم صوتي بالفاتورة</div><div className="text-[11px] text-[#829394]">قل: اعمل فاتورة جديدة، ثم اسم المنتج، ثم احفظ</div></div><VoiceCommandButton onTranscript={handleVoiceCommand} prompt={voiceInvoiceMode ? "قل اسم المنتج أو قل احفظ" : "قل اعمل فاتورة جديدة"} /></div>
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1.38fr)_minmax(340px,0.62fr)]">
       <section className="soft-shadow overflow-hidden rounded-2xl border border-[#d9e6e0] bg-white">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e5edeb] px-5 py-4"><div><div className="flex items-center gap-2"><div className="h-2.5 w-2.5 animate-pulse rounded-full bg-[#36a77f]" /><h2 className="font-extrabold text-[#183741]">ماسح الباركود</h2></div><p className="mt-1 text-[11px] font-semibold text-[#809194]">امسح المنتجات بالتتابع دون لمس الشاشة</p></div><div className="flex items-center gap-2 rounded-lg bg-[#edf7f3] px-2.5 py-1.5 text-[10px] font-extrabold text-[#20765d]"><Zap size={13} /> معالجة فورية · {queueRef.current.length} في الانتظار</div></div>
@@ -278,6 +321,7 @@ function ProductsView() {
   const [search, setSearch] = useState("");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
+  const [voiceProductField, setVoiceProductField] = useState<"name" | "price" | null>(null);
   const [form, setForm] = useState({ name: "", barcode: "", sellingPrice: "", stockQuantity: "", minimumStock: "5" });
   const input = useMemo(() => ({ search }), [search]);
   const products = trpc.products.list.useQuery(input, { retry: false });
@@ -287,6 +331,7 @@ function ProductsView() {
       setForm({ name: product.name, barcode: product.barcode, sellingPrice: String(product.sellingPrice), stockQuantity: String(product.stockQuantity), minimumStock: String(product.minimumStock) });
       toast.info("هذا الباركود محفوظ بالفعل", { description: "تم فتح المنتج للتعديل مباشرة." });
     },
+    onError: () => { setVoiceProductField("name"); speakArabic("الباركود جديد. ما اسم المنتج؟"); },
   });
   const handleProductCamera = (value: string) => { setCameraOpen(false); setForm(current => ({ ...current, barcode: value })); duplicateLookup.mutate({ barcode: value }); };
   const resetForm = () => { setEditingId(null); setForm({ name: "", barcode: "", sellingPrice: "", stockQuantity: "", minimumStock: "5" }); };
@@ -295,8 +340,25 @@ function ProductsView() {
   const payload = { name: form.name, barcode: form.barcode, sellingPrice: Number(form.sellingPrice), costPrice: 0, stockQuantity: Number(form.stockQuantity || 0), minimumStock: Number(form.minimumStock || 5), unit: "قطعة" as const };
   const submit = (event: React.FormEvent) => { event.preventDefault(); if (editingId) update.mutate({ ...payload, id: editingId }); else create.mutate(payload); };
   const checkBarcode = () => { const value = form.barcode.trim(); if (value.length >= 3) duplicateLookup.mutate({ barcode: value }); };
+  const handleProductVoice = (transcript: string) => {
+    if (voiceProductField === "name") {
+      setForm(current => ({ ...current, name: transcript.trim() }));
+      setVoiceProductField("price");
+      speakArabic("ما سعر المنتج؟");
+      return;
+    }
+    if (voiceProductField === "price") {
+      const price = parseVoiceProductPhrase(`سعر ${transcript}`).price;
+      if (price === undefined) { speakArabic("قل السعر مثل خمسة جنيه أو خمسة فاصلة خمسين."); return; }
+      setForm(current => ({ ...current, sellingPrice: String(price) }));
+      setVoiceProductField(null);
+      speakArabic("تم تسجيل الاسم والسعر. قل احفظ لحفظ المنتج.");
+      return;
+    }
+    if (isSaveVoiceCommand(transcript)) submit(new Event("submit") as unknown as React.FormEvent);
+  };
   const saving = create.isPending || update.isPending;
-  return <div className="space-y-5"><div className="grid gap-4 xl:grid-cols-[0.7fr_1.3fr]"><form onSubmit={submit} className="soft-shadow rounded-2xl border border-[#e0e9e6] bg-white p-5"><div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#e6f6f0] text-[#287e64]"><PackagePlus size={18} /></div><div><h3 className="font-extrabold text-[#29464e]">{editingId ? "تعديل المنتج المحفوظ" : "إضافة منتج سريع"}</h3><p className="text-[11px] text-[#8a9c9c]">امسح الباركود؛ إذا كان محفوظًا سيفتح للتعديل تلقائيًا</p></div></div><div className="mt-5 space-y-3"><Field label="اسم المنتج"><input required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="مثال: مياه معدنية" /></Field><Field label="الباركود"><div className="flex gap-2"><input required value={form.barcode} onChange={e => setForm({ ...form, barcode: e.target.value })} onBlur={checkBarcode} placeholder="6221234567890" className="mono min-w-0 flex-1" /><button type="button" onClick={() => setCameraOpen(true)} className="flex shrink-0 items-center gap-1 rounded-xl bg-[#0f5d4d] px-3 text-[11px] font-extrabold text-white"><Camera size={14} /> كاميرا</button></div></Field>{editingId && <div className="rounded-xl border border-[#f0dca6] bg-[#fff8e7] px-3 py-2 text-[11px] font-bold text-[#8c690f]">هذا المنتج محفوظ بالفعل. أي تعديل هنا سيحدّث السجل الموجود بدل إنشاء نسخة جديدة.</div>}<div className="grid grid-cols-2 gap-3"><Field label="سعر البيع"><input required min="0" step="0.01" type="number" value={form.sellingPrice} onChange={e => setForm({ ...form, sellingPrice: e.target.value })} placeholder="0.00" /></Field><Field label="المخزون"><input min="0" step="1" type="number" value={form.stockQuantity} onChange={e => setForm({ ...form, stockQuantity: e.target.value })} placeholder="0" /></Field></div><div className="flex gap-2"><button disabled={saving} className="mt-2 flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#0f5d4d] py-3 text-sm font-extrabold text-white hover:bg-[#0b493c] disabled:opacity-50"><Plus size={16} /> {saving ? "جارٍ الحفظ" : editingId ? "حفظ التعديل" : "حفظ المنتج"}</button>{editingId && <button type="button" onClick={resetForm} className="mt-2 rounded-xl border border-[#dbe5e1] px-4 text-xs font-bold text-[#617679]">إلغاء</button>}</div></div></form><section className="soft-shadow rounded-2xl border border-[#e0e9e6] bg-white"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e8efed] px-5 py-4"><div><h3 className="font-extrabold text-[#29464e]">كتالوج المنتجات</h3><p className="mt-1 text-[11px] text-[#8a9c9c]">بحث سريع بالاسم أو الباركود أو SKU</p></div><div className="relative w-full max-w-xs"><Search className="absolute right-3 top-1/2 -translate-y-1/2 text-[#93a3a3]" size={16} /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="ابحث في المنتجات" className="w-full rounded-xl border border-[#dfe9e5] bg-[#f8fbfa] py-2.5 pr-9 pl-3 text-xs outline-none focus:border-[#77bca8]" /></div></div>{products.isLoading ? <div className="p-8 text-center text-xs text-[#829394]">جارٍ تحميل المنتجات...</div> : products.data?.length ? <div className="overflow-x-auto"><table className="w-full text-right"><thead className="bg-[#f8fbfa] text-[10px] font-extrabold text-[#88999a]"><tr><th className="px-5 py-3">المنتج</th><th className="px-5 py-3">الباركود</th><th className="px-5 py-3">السعر</th><th className="px-5 py-3">المخزون</th><th className="px-5 py-3">الحالة</th></tr></thead><tbody>{products.data.map(product => <tr key={product.id} className="border-t border-[#eef3f1] text-xs"><td className="px-5 py-3 font-extrabold text-[#34515a]">{product.name}</td><td className="mono px-5 py-3 text-[#819293]">{product.barcode}</td><td className="px-5 py-3 font-extrabold text-[#29464e]">{money(product.sellingPrice)}</td><td className="px-5 py-3 text-[#657d80]">{integer(product.stockQuantity)} {product.unit}</td><td className="px-5 py-3">{Number(product.stockQuantity) <= Number(product.minimumStock) ? <span className="rounded-full bg-[#fff3cf] px-2 py-1 text-[10px] font-bold text-[#9b7000]">مخزون منخفض</span> : <span className="rounded-full bg-[#e7f6f0] px-2 py-1 text-[10px] font-bold text-[#2a8064]">متاح</span>}</td></tr>)}</tbody></table></div> : <EmptyState icon={<Boxes size={20} />} title="لا توجد منتجات" body="أضف منتجك الأول ليبدأ الكاشير في استقبال عمليات المسح." />}</section></div><BarcodeCameraScanner open={cameraOpen} onClose={() => setCameraOpen(false)} onDetected={handleProductCamera} /></div>;
+  return <div className="space-y-5"><div className="grid gap-4 xl:grid-cols-[0.7fr_1.3fr]"><form onSubmit={submit} className="soft-shadow rounded-2xl border border-[#e0e9e6] bg-white p-5"><div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#e6f6f0] text-[#287e64]"><PackagePlus size={18} /></div><div><h3 className="font-extrabold text-[#29464e]">{editingId ? "تعديل المنتج المحفوظ" : "إضافة منتج سريع"}</h3><p className="text-[11px] text-[#8a9c9c]">امسح الباركود؛ إذا كان محفوظًا سيفتح للتعديل تلقائيًا</p></div><div className="mr-auto"><VoiceCommandButton onTranscript={handleProductVoice} prompt={voiceProductField === "name" ? "قل اسم المنتج" : voiceProductField === "price" ? "قل سعر المنتج" : "قل احفظ بعد مسح الباركود"} /></div></div><div className="mt-5 space-y-3"><Field label="اسم المنتج"><input required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="مثال: مياه معدنية" /></Field><Field label="الباركود"><div className="flex gap-2"><input required value={form.barcode} onChange={e => setForm({ ...form, barcode: e.target.value })} onBlur={checkBarcode} placeholder="6221234567890" className="mono min-w-0 flex-1" /><button type="button" onClick={() => setCameraOpen(true)} className="flex shrink-0 items-center gap-1 rounded-xl bg-[#0f5d4d] px-3 text-[11px] font-extrabold text-white"><Camera size={14} /> كاميرا</button></div></Field>{editingId && <div className="rounded-xl border border-[#f0dca6] bg-[#fff8e7] px-3 py-2 text-[11px] font-bold text-[#8c690f]">هذا المنتج محفوظ بالفعل. أي تعديل هنا سيحدّث السجل الموجود بدل إنشاء نسخة جديدة.</div>}<div className="grid grid-cols-2 gap-3"><Field label="سعر البيع"><input required min="0" step="0.01" type="number" value={form.sellingPrice} onChange={e => setForm({ ...form, sellingPrice: e.target.value })} placeholder="0.00" /></Field><Field label="المخزون"><input min="0" step="1" type="number" value={form.stockQuantity} onChange={e => setForm({ ...form, stockQuantity: e.target.value })} placeholder="0" /></Field></div><div className="flex gap-2"><button disabled={saving} className="mt-2 flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#0f5d4d] py-3 text-sm font-extrabold text-white hover:bg-[#0b493c] disabled:opacity-50"><Plus size={16} /> {saving ? "جارٍ الحفظ" : editingId ? "حفظ التعديل" : "حفظ المنتج"}</button>{editingId && <button type="button" onClick={resetForm} className="mt-2 rounded-xl border border-[#dbe5e1] px-4 text-xs font-bold text-[#617679]">إلغاء</button>}</div></div></form><section className="soft-shadow rounded-2xl border border-[#e0e9e6] bg-white"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e8efed] px-5 py-4"><div><h3 className="font-extrabold text-[#29464e]">كتالوج المنتجات</h3><p className="mt-1 text-[11px] text-[#8a9c9c]">بحث سريع بالاسم أو الباركود أو SKU</p></div><div className="relative w-full max-w-xs"><Search className="absolute right-3 top-1/2 -translate-y-1/2 text-[#93a3a3]" size={16} /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="ابحث في المنتجات" className="w-full rounded-xl border border-[#dfe9e5] bg-[#f8fbfa] py-2.5 pr-9 pl-3 text-xs outline-none focus:border-[#77bca8]" /></div></div>{products.isLoading ? <div className="p-8 text-center text-xs text-[#829394]">جارٍ تحميل المنتجات...</div> : products.data?.length ? <div className="overflow-x-auto"><table className="w-full text-right"><thead className="bg-[#f8fbfa] text-[10px] font-extrabold text-[#88999a]"><tr><th className="px-5 py-3">المنتج</th><th className="px-5 py-3">الباركود</th><th className="px-5 py-3">السعر</th><th className="px-5 py-3">المخزون</th><th className="px-5 py-3">الحالة</th></tr></thead><tbody>{products.data.map(product => <tr key={product.id} className="border-t border-[#eef3f1] text-xs"><td className="px-5 py-3 font-extrabold text-[#34515a]">{product.name}</td><td className="mono px-5 py-3 text-[#819293]">{product.barcode}</td><td className="px-5 py-3 font-extrabold text-[#29464e]">{money(product.sellingPrice)}</td><td className="px-5 py-3 text-[#657d80]">{integer(product.stockQuantity)} {product.unit}</td><td className="px-5 py-3">{Number(product.stockQuantity) <= Number(product.minimumStock) ? <span className="rounded-full bg-[#fff3cf] px-2 py-1 text-[10px] font-bold text-[#9b7000]">مخزون منخفض</span> : <span className="rounded-full bg-[#e7f6f0] px-2 py-1 text-[10px] font-bold text-[#2a8064]">متاح</span>}</td></tr>)}</tbody></table></div> : <EmptyState icon={<Boxes size={20} />} title="لا توجد منتجات" body="أضف منتجك الأول ليبدأ الكاشير في استقبال عمليات المسح." />}</section></div><BarcodeCameraScanner open={cameraOpen} onClose={() => setCameraOpen(false)} onDetected={handleProductCamera} /></div>;
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) { return <label className="block"><span className="mb-1.5 block text-[11px] font-extrabold text-[#597175]">{label}</span>{children}</label>; }
