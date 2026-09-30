@@ -1,12 +1,12 @@
 import { AXIOS_TIMEOUT_MS, COOKIE_NAME, ONE_YEAR_MS, decodeOAuthState } from "@shared/const";
 import { ForbiddenError } from "@shared/_core/errors";
 import axios, { type AxiosInstance } from "axios";
-import { createClient } from "@supabase/supabase-js";
 import { parse as parseCookieHeader } from "cookie";
 import type { Request } from "express-serve-static-core";
 import { SignJWT, jwtVerify } from "jose";
 import type { User } from "../../drizzle/schema";
 import * as db from "../db";
+import { firebaseAdminAuth } from "../firebase";
 import { ENV } from "./env";
 import type {
   ExchangeTokenRequest,
@@ -81,10 +81,6 @@ const createOAuthHttpClient = (): AxiosInstance =>
     baseURL: ENV.oAuthServerUrl,
     timeout: AXIOS_TIMEOUT_MS,
   });
-
-const supabaseAuthClient = ENV.supabaseUrl && ENV.supabaseAnonKey
-  ? createClient(ENV.supabaseUrl, ENV.supabaseAnonKey, { auth: { persistSession: false, autoRefreshToken: false } })
-  : null;
 
 class SDKServer {
   private readonly client: AxiosInstance;
@@ -275,61 +271,23 @@ class SDKServer {
       }
     }
 
-    // Supabase Auth validation for the Vercel deployment. Prefer the official
-    // getUser API so projects using newer signing keys work too.
+    // Firebase Authentication validation for the Vercel deployment.
     const authHeader = req.headers.authorization;
     if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
       const bearerToken = authHeader.slice(7);
-      if (supabaseAuthClient) {
-        try {
-          const { data, error } = await supabaseAuthClient.auth.getUser(bearerToken);
-          if (!error && data.user) {
-            const metadata = data.user.user_metadata as Record<string, unknown> | undefined;
-            await db.upsertUser({
-              openId: data.user.id,
-              email: data.user.email ?? null,
-              name: typeof metadata?.full_name === "string" ? metadata.full_name : data.user.email ?? null,
-              loginMethod: "supabase",
-              lastSignedIn: new Date(),
-            });
-            const user = await db.getUserByOpenId(data.user.id);
-            if (user) {
-              if (!user.isActive) throw ForbiddenError("User account is inactive");
-              return user;
-            }
-          }
-        } catch (error) {
-          console.warn("[Auth] Supabase getUser validation failed", String(error));
-        }
-      }
-
-      // Fallback for self-contained legacy Supabase JWT validation.
-      if (!ENV.supabaseJwtSecret) {
-        throw ForbiddenError("Invalid Supabase session");
-      }
       try {
-        const { payload } = await jwtVerify(bearerToken, new TextEncoder().encode(ENV.supabaseJwtSecret));
-        const openId = typeof payload.sub === "string" ? payload.sub : "";
-        if (openId) {
-          const signedInAt = new Date();
-          const email = typeof payload.email === "string" ? payload.email : null;
-          const metadata = payload.user_metadata as Record<string, unknown> | undefined;
-          await db.upsertUser({
-            openId,
-            email,
-            name: typeof metadata?.full_name === "string" ? metadata.full_name : email,
-            loginMethod: "supabase",
-            lastSignedIn: signedInAt,
-          });
-          const user = await db.getUserByOpenId(openId);
-          if (user) {
-            if (!user.isActive) throw ForbiddenError("User account is inactive");
-            return user;
-          }
+        const decoded = await firebaseAdminAuth().verifyIdToken(bearerToken);
+        const name = typeof decoded.name === "string" ? decoded.name : decoded.email ?? null;
+        await db.upsertUser({ openId: decoded.uid, email: decoded.email ?? null, name, loginMethod: "firebase", lastSignedIn: new Date() });
+        const user = await db.getUserByOpenId(decoded.uid);
+        if (user) {
+          if (!user.isActive) throw ForbiddenError("User account is inactive");
+          return user;
         }
       } catch (error) {
-        console.warn("[Auth] Supabase token verification failed", String(error));
+        console.warn("[Auth] Firebase ID token validation failed", String(error));
       }
+      throw ForbiddenError("Invalid Firebase session");
     }
 
     const session = await this.verifySession(sessionToken);

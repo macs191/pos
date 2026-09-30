@@ -1,10 +1,8 @@
 export const ENV = {
   appId: process.env.VITE_APP_ID ?? "",
-  cookieSecret: process.env.JWT_SECRET || process.env.SUPABASE_JWT_SECRET || "",
-  databaseUrl: process.env.POSTGRES_URL_NON_POOLING || process.env.POSTGRES_URL || process.env.DATABASE_URL || "",
-  supabaseJwtSecret: process.env.SUPABASE_JWT_SECRET ?? "",
-  supabaseUrl: process.env.SUPABASE_URL ?? "",
-  supabaseAnonKey: process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? "",
+  cookieSecret: process.env.JWT_SECRET ?? "",
+  firebaseDatabaseUrl: process.env.FIREBASE_DATABASE_URL ?? "",
+  firebaseProjectId: process.env.FIREBASE_PROJECT_ID ?? "",
   oAuthServerUrl: process.env.OAUTH_SERVER_URL ?? "",
   ownerOpenId: process.env.OWNER_OPEN_ID ?? "",
   ownerEmail: process.env.OWNER_EMAIL ?? "",

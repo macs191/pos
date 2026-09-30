@@ -1,56 +1,43 @@
-import { supabase } from "@/lib/supabase";
+import { firebaseAuth, firebaseConfigured } from "@/lib/firebase";
 import { trpc } from "@/lib/trpc";
 import { TRPCClientError } from "@trpc/client";
+import { createUserWithEmailAndPassword, onAuthStateChanged, signInWithEmailAndPassword, signOut, updateProfile, type User as FirebaseUser } from "firebase/auth";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 export function useAuth() {
   const utils = trpc.useUtils();
-  const [sessionReady, setSessionReady] = useState(!supabase);
-  const [hasSession, setHasSession] = useState(false);
+  const [sessionReady, setSessionReady] = useState(!firebaseAuth);
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
 
   useEffect(() => {
-    if (!supabase) return;
-    let active = true;
-    void supabase.auth.getSession().then(({ data }) => {
-      if (!active) return;
-      setHasSession(Boolean(data.session));
+    if (!firebaseAuth) return;
+    return onAuthStateChanged(firebaseAuth, nextUser => {
+      setFirebaseUser(nextUser);
       setSessionReady(true);
-    });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      setHasSession(Boolean(nextSession));
-      setSessionReady(true);
-      // Supabase holds an internal auth lock while invoking this callback.
-      // Defer tRPC invalidation because its headers() calls getSession().
       window.setTimeout(() => { void utils.auth.me.invalidate(); }, 0);
     });
-    return () => { active = false; listener.subscription.unsubscribe(); };
   }, [utils]);
 
   const meQuery = trpc.auth.me.useQuery(undefined, {
-    enabled: supabase ? hasSession : true,
+    enabled: firebaseConfigured ? Boolean(firebaseUser) : false,
     retry: false,
     refetchOnWindowFocus: false,
   });
   const logoutMutation = trpc.auth.logout.useMutation({ onSuccess: () => utils.auth.me.setData(undefined, null) });
 
   const signIn = useCallback(async (email: string, password: string) => {
-    if (!supabase) throw new Error("إعدادات Supabase غير موجودة في Vercel.");
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
-    setHasSession(Boolean(data.session));
-    setSessionReady(true);
+    if (!firebaseAuth) throw new Error("إعدادات Firebase غير موجودة في Vercel.");
+    await signInWithEmailAndPassword(firebaseAuth, email.trim(), password);
   }, []);
 
   const signUp = useCallback(async (email: string, password: string, fullName: string) => {
-    if (!supabase) throw new Error("إعدادات Supabase غير موجودة في Vercel.");
-    const { data, error } = await supabase.auth.signUp({ email, password, options: { data: { full_name: fullName } } });
-    if (error) throw error;
-    setHasSession(Boolean(data.session));
-    setSessionReady(true);
+    if (!firebaseAuth) throw new Error("إعدادات Firebase غير موجودة في Vercel.");
+    const credential = await createUserWithEmailAndPassword(firebaseAuth, email.trim(), password);
+    if (fullName.trim()) await updateProfile(credential.user, { displayName: fullName.trim() });
   }, []);
 
   const logout = useCallback(async () => {
-    if (supabase) await supabase.auth.signOut();
+    if (firebaseAuth) await signOut(firebaseAuth);
     try { await logoutMutation.mutateAsync(); } catch (error: unknown) {
       if (!(error instanceof TRPCClientError) || error.data?.code !== "UNAUTHORIZED") throw error;
     } finally {
@@ -61,11 +48,11 @@ export function useAuth() {
 
   const state = useMemo(() => ({
     user: meQuery.data ?? null,
-    loading: !sessionReady || (hasSession && meQuery.isLoading) || logoutMutation.isPending,
+    loading: !sessionReady || (Boolean(firebaseUser) && meQuery.isLoading) || logoutMutation.isPending,
     error: meQuery.error ?? logoutMutation.error ?? null,
-    sessionIssue: hasSession && !meQuery.isLoading && !meQuery.data ? "تم تسجيل الدخول في Supabase، لكن تعذر ربط الحساب بالموقع. راجع متغيرات Supabase في Vercel." : null,
+    sessionIssue: Boolean(firebaseUser) && !meQuery.isLoading && !meQuery.data ? "تم تسجيل الدخول في Firebase، لكن تعذر ربط الحساب بالموقع. تحقق من إعدادات Firebase Admin في Vercel." : null,
     isAuthenticated: Boolean(meQuery.data),
-  }), [hasSession, logoutMutation.error, logoutMutation.isPending, meQuery.data, meQuery.error, meQuery.isLoading, sessionReady]);
+  }), [firebaseUser, logoutMutation.error, logoutMutation.isPending, meQuery.data, meQuery.error, meQuery.isLoading, sessionReady]);
 
-  return { ...state, refresh: () => meQuery.refetch(), logout, signIn, signUp, supabaseConfigured: Boolean(supabase) };
+  return { ...state, refresh: () => meQuery.refetch(), logout, signIn, signUp, firebaseConfigured };
 }

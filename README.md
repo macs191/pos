@@ -1,162 +1,117 @@
 # سوقي — Supermarket POS SaaS
 
-Arabic RTL supermarket point-of-sale and store operations dashboard focused on the fastest path from **scan → find → add → total → invoice → stock update**.
+تطبيق Web يعمل كتطبيق Android قابل للتثبيت عبر PWA، ومخصص لنقاط البيع وإدارة المتجر باللغة العربية وواجهة RTL.
 
-## Delivered in this build
+## المميزات
 
-- Arabic RTL operator dashboard with persistent navigation.
-- POS screen optimized for USB/Bluetooth keyboard-style barcode scanners.
-- Sequential barcode queue: rapid scans are processed one at a time without dropping input.
-- Phone camera barcode scanning through the rear camera, with permission/error states and direct queue insertion.
-- Android-first PWA shell: portrait standalone mode, install manifest, service-worker shell cache, mobile bottom navigation, and safe-area spacing.
-- POS opens the camera automatically and keeps scanning active; moving the barcode out of frame re-arms the reader for the next item.
-- Spoken Arabic invoice total after a successful save using the browser Speech Synthesis API.
-- Duplicate barcode protection at the tenant + database unique-index level.
-- Cart aggregation: scanning the same product increments quantity instead of creating a duplicate row.
-- Atomic invoice creation transaction: invoice, invoice items, stock decrement, inventory movement, and audit log are committed together.
-- Product catalog with name/barcode/price/stock capture and search.
-- Low-stock dashboard and inventory alert screen.
-- Invoice history with search and print action.
-- Users, branches, subscription, settings, and super-admin navigation surfaces.
-- First registered user provisioning: supermarket, main branch, owner, and a 15-day free subscription.
-- Supabase Auth email/password login; disable Supabase **Confirm email** to let new users enter immediately without email messages.
-- Super Admin controls for stores, subscriptions, users, roles, activation, products, categories, and invoice status.
-- Shared catalog within each supermarket tenant: authorized staff use the same product/customer data and can update an existing product by barcode instead of creating a duplicate.
-- Tenant-scoped procedures: all product, invoice, inventory, customer, branch, and user queries are filtered by `supermarketId`.
-- Role gates for `OWNER`, `ADMIN`, `MANAGER`, `CASHIER`, and `SUPER_ADMIN`.
-- Server-side validation with Zod and database-safe parameterized Drizzle queries.
-- Responsive layouts and large, keyboard-friendly scan input.
+- تسجيل وإنشاء حساب بالبريد وكلمة المرور عبر **Firebase Authentication**.
+- بدء مجاني لمدة 15 يومًا لكل متجر جديد، مع تحكم Super Admin في الاشتراك والحالة وتاريخ الانتهاء.
+- تخزين كامل للمتاجر، المستخدمين، المنتجات، العملاء، الفواتير، المخزون، الحركات وسجلات التدقيق في **Firebase Realtime Database**.
+- ربط المنتجات داخل المتجر بالباركود؛ المسح المتكرر لنفس المنتج يزيد الكمية بدل إنشاء سطر جديد.
+- كاميرا الهاتف تعمل على شاشة نقطة البيع للقراءة المستمرة للمنتجات، مع طابور سريع لا يسقط المسحات المتتابعة.
+- عند حفظ الفاتورة، يُنطق الإجمالي بالعربية عبر Speech Synthesis عند دعم المتصفح.
+- إضافة وتعديل المنتجات بالباركود، والبحث الصوتي العربي عن اسم المنتج وسعره وكميته.
+- لوحة Super Admin لإدارة المستخدمين، الأدوار، تفعيل الحسابات، المتاجر، الاشتراكات، المنتجات، الأقسام وحالات الفواتير.
+- تصميم Android-first، وضع مستقل، manifest، service worker، تنقل سفلي للهاتف وsafe-area.
 
-## Important runtime note
+## بنية التخزين والأمان
 
-The project runs as a Vercel-compatible React/Express application with Supabase services:
+الخادم فقط يتصل بـ Firebase Admin SDK. المتصفح يستخدم Firebase Authentication للحصول على ID token ويرسله إلى tRPC، وكل عمليات البيانات تمر عبر Express/tRPC مع عزل `supermarketId` والصلاحيات.
 
-- React + Vite + TypeScript + Tailwind
-- Express + tRPC server procedures
-- Drizzle ORM over Supabase PostgreSQL
-- Supabase Auth access tokens forwarded to the tRPC API
+قواعد Realtime Database في [`database.rules.json`](database.rules.json) تمنع القراءة والكتابة المباشرة من المتصفح؛ هذا مقصود لأن الخادم هو طبقة الوصول الوحيدة.
 
-The frontend is a Vite PWA rather than Next.js, but it is configured for Vercel static output plus serverless API functions.
+لا تضع أبدًا `FIREBASE_PRIVATE_KEY` أو Service Account JSON أو أي كلمة مرور في GitHub أو في كود المتصفح. إعدادات `VITE_FIREBASE_*` العامة فقط يمكن أن تصل للواجهة، أما مفاتيح `FIREBASE_*` الخاصة فتوضع في Vercel Environment Variables.
 
-## Local development
+## متغيرات Vercel المطلوبة
 
-```bash
-cd /home/ubuntu/supermarket-pos-saas
-pnpm install
-pnpm dev
-```
-
-The managed preview URL is exposed by the WebDev project runtime. Do not start a second long-lived server on the same project port.
-
-## Database
-
-Schema source:
+### إعدادات المتصفح العامة
 
 ```text
-drizzle/schema.ts
-drizzle-pg/
+VITE_FIREBASE_API_KEY
+VITE_FIREBASE_AUTH_DOMAIN
+VITE_FIREBASE_DATABASE_URL
+VITE_FIREBASE_PROJECT_ID
+VITE_FIREBASE_STORAGE_BUCKET
+VITE_FIREBASE_MESSAGING_SENDER_ID
+VITE_FIREBASE_APP_ID
+VITE_FIREBASE_MEASUREMENT_ID
 ```
 
-Generate migrations after schema edits:
+### إعدادات الخادم السرية
 
-```bash
-pnpm drizzle-kit generate
+```text
+FIREBASE_PROJECT_ID
+FIREBASE_CLIENT_EMAIL
+FIREBASE_PRIVATE_KEY
+FIREBASE_DATABASE_URL
+OWNER_EMAIL              # اختياري لترقية الحساب المحدد إلى SUPER_ADMIN
+OWNER_OPEN_ID            # اختياري للتوافق
+JWT_SECRET               # مطلوب لجلسة Express القديمة/المساندة
 ```
 
-The PostgreSQL baseline migration is in `drizzle-pg/0000_complex_jocasta.sql`. Apply it to Supabase if the tables do not already exist.
+`FIREBASE_PRIVATE_KEY` يجب أن يكون كاملًا بصيغة PEM، ويُحفظ في Vercel كقيمة سرية. إذا كان محفوظًا كسطر واحد فيجب أن يحتوي على `\\n` بين الأسطر؛ التطبيق يحولها تلقائيًا إلى أسطر PEM.
 
-For future schema changes, use the project migration workflow and inspect the generated SQL before applying it. Do not insert test data through migration tooling.
+## إعداد Firebase
 
-## Authentication and first-login provisioning
+1. فعّل Email/Password من Firebase Console → Authentication → Sign-in method.
+2. أضف نطاق Vercel إلى Authentication → Settings → Authorized domains.
+3. أنشئ Realtime Database في نفس المشروع.
+4. طبّق قواعد [`database.rules.json`](database.rules.json)، أو اجعل القواعد مكافئة لـ:
 
-Supabase Auth handles email/password sessions. When a newly registered user is first seen by the API, the server provisions:
+```json
+{
+  "rules": {
+    ".read": false,
+    ".write": false
+  }
+}
+```
 
-1. A supermarket tenant.
-2. A main branch.
-3. An `OWNER` user record (or `SUPER_ADMIN` when the email matches `OWNER_EMAIL`).
-4. A free plan and active subscription ending 15 days after registration.
+5. أضف متغيرات Vercel السابقة إلى **Production وPreview** ثم أعد النشر.
+6. لا تضع Service Account JSON في المستودع. الاختبار `server/firebase.config.test.ts` يتحقق من اتصال Admin بالـ Realtime Database دون حفظ بيانات الاعتماد في الملفات.
 
-Required Vercel environment variables are `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_JWT_SECRET`, `POSTGRES_PRISMA_URL`, and `OWNER_EMAIL`. Never expose `SUPABASE_SERVICE_ROLE_KEY` or database passwords to the browser.
+## الدخول إلى لوحة Super Admin
 
-In Supabase Dashboard, open **Authentication → Providers → Email** and turn **Confirm email** off. This prevents confirmation messages while keeping password login and Admin security intact.
+الحساب الذي يطابق `OWNER_EMAIL` يصبح `SUPER_ADMIN` عند أول دخول. يجب أن يكون الحساب موجودًا في Firebase Authentication أولًا، ثم يسجل دخوله مرة واحدة حتى ينشئ الخادم سجل المتجر والمستخدم. بعد ذلك تظهر شاشة **الإدارة العليا** في القائمة.
 
-If a user can register but cannot enter, confirm that the same deployment has `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_JWT_SECRET`, then redeploy Vercel. The browser session is now validated server-side through Supabase `getUser`, with JWT verification as a fallback.
+يمكن لـ Super Admin:
 
-### التحكم الصوتي
+- مشاهدة مؤشرات المتاجر والمستخدمين والمنتجات والفواتير.
+- تفعيل أو تعطيل المستخدمين وتعديل أدوارهم.
+- تغيير حالة الاشتراك وتاريخ الانتهاء.
+- تعطيل المنتجات وتعديل حالات الفواتير.
 
-من شاشة نقطة البيع اضغط **تحكم صوتي** ثم استخدم أوامر عربية مثل:
+## الاستخدام على Android
 
-- «اعمل فاتورة جديدة» لبدء فاتورة.
-- «مياه معدنية بخمسة» أو «شيبسي بالطماطم عدد ثلاثة» لإضافة منتج موجود بالاسم.
-- «احفظ» لحفظ الفاتورة ونطق الإجمالي بصوت عربي.
+افتح رابط HTTPS في Chrome على الهاتف، ثم اختر **Add to Home screen / تثبيت التطبيق**. بعد التثبيت يفتح التطبيق بوضع مستقل. بعد تسجيل الدخول، افتح **نقطة البيع**؛ تُفعّل الكاميرا الخلفية ويستمر المسح. اسمح للكاميرا والميكروفون عند استخدام الميزات الصوتية.
 
-ومن شاشة المنتجات، امسح باركودًا جديدًا؛ سيطلب التطبيق اسم المنتج ثم السعر، وبعدها قل «احفظ». الميزة تستخدم Web Speech API وتعمل بأفضل صورة في Chrome على Android مع السماح بالميكروفون؛ يظل إدخال النص والكاميرا متاحين كبديل.
+الكاميرا تحتاج HTTPS وصلاحية المتصفح. إذا لم يدعم المتصفح Web Speech API، يبقى إدخال الباركود النصي والكاميرا متاحين.
 
-## POS verification checklist
+## أوامر صوتية أمثلة
 
-1. Sign in through the **تسجيل الدخول** action.
-2. Open **نقطة البيع**. The barcode input is focused automatically.
-3. Enter a product barcode followed by `Enter` to simulate a scanner.
-4. Send several barcode + Enter sequences quickly. The scan queue processes them sequentially.
-5. Press **فتح الكاميرا** from the barcode area, allow camera access, and hold a barcode inside the guide. The decoded value is inserted into the same sequential queue.
-6. Repeat the same barcode. Quantity increments on the existing cart row.
-7. Send an unknown barcode. The cart is unchanged and a clear toast is shown.
-8. Press **إنشاء الفاتورة**. The transaction saves the invoice and snapshots, decreases stock, records `SALE`, and creates an audit log.
-9. After save, the browser announces aloud: `تم حفظ الفاتورة. إجمالي الفاتورة 100.00 جنيه` in Arabic when speech synthesis is available.
-10. Confirm the receipt under **الفواتير** and the alert under **المخزون** if a threshold is reached.
-11. Use **Ctrl + P** in the invoice screen for browser printing; add thermal/A4 printer CSS and a print template before going live with a physical printer.
+- «اعمل فاتورة جديدة».
+- «مياه معدنية بخمسة».
+- «شيبسي بالطماطم عدد ثلاثة».
+- «احفظ».
 
-Camera access requires HTTPS and a browser permission. The managed preview is HTTPS; on a local non-HTTPS origin, use the keyboard-style scanner or serve the app through a secure local tunnel.
+ومن شاشة المنتجات، امسح باركودًا جديدًا ثم قل الاسم والسعر و«احفظ». يمكن دائمًا استخدام الكتابة كبديل.
 
-### Android installation
-
-Open the HTTPS app URL in Chrome on Android and choose **Add to Home screen / تثبيت التطبيق**. The app launches in portrait standalone mode at `/pos`, with the camera opened automatically for the active cashier session. The PWA shell is cacheable, but authenticated API requests and database data always remain network-backed and are never stored in the service-worker cache.
-
-### Shared data model
-
-Products, customers, invoices, stock movements, and users are linked by the `supermarketId` tenant. Authorized users within the same supermarket therefore see the same catalog and inventory. A product barcode is unique inside that supermarket; a duplicate barcode lookup opens the existing product for editing. Cross-tenant data is intentionally not shared, so one store cannot modify another store's catalog.
-
-## Permissions
-
-- `CASHIER`: POS and invoice creation; no product price editing or user management.
-- `MANAGER`: POS, invoices, inventory adjustment, and operational reports.
-- `ADMIN` / `OWNER`: catalog and price management plus store operations.
-- `SUPER_ADMIN`: complete platform-level control of stores, subscriptions, users, products, categories, and invoice status.
-
-Every mutation validates the authenticated session, derives the tenant from the session user, and applies the tenant predicate in the database query. Client-provided tenant IDs are not accepted by the core POS mutations.
-
-## Quality checks
+## التطوير والاختبار
 
 ```bash
+pnpm install
 pnpm check
 pnpm test
 pnpm build
+pnpm dev
 ```
 
-Current verification completed in this session:
+الاختبارات تشمل تسجيل الخروج، منطق السلة والإجمالي، واختبار اتصال Firebase Admin بالـ Realtime Database. الاختبار الأخير يحتاج متغيرات Firebase السرية الصحيحة.
 
-- TypeScript: passed.
-- Vitest: passed (`server/auth.logout.test.ts`).
-- Production Vite + server build: passed.
-- Live preview screenshots: landing, POS, products, and invoices rendered successfully.
+## النشر على Vercel
 
-## Deployment
-
-Use the WebDev project's managed publish/deploy flow for this initialized project. The runtime is a managed Node server with a preview URL and database provisioning. Before production use:
-
-- Configure the OAuth redirect/client settings for the published origin.
-- Confirm the database migration is applied in the target environment.
-- Configure the owner open ID for super-admin access.
-- Configure the printer and run a real scanner test with the intended device.
-- Add a dedicated print template for 58mm, 80mm, and A4 receipts.
-- Add rate limiting and operational monitoring appropriate to the final hosting environment.
-
-## Project map
-
-```text
-client/src/pages/Home.tsx      Unified RTL dashboard and POS feature surface
-client/src/index.css           Design tokens and responsive styling
-server/routers.ts              Typed tenant-scoped business procedures
-server/db.ts                   DB connection and tenant provisioning helpers
-drizzle/schema.ts              Tenant, catalog, invoice, stock, user, plan tables
-```
+- أمر التثبيت: `pnpm install --frozen-lockfile`
+- أمر البناء: `pnpm build`
+- مجلد الإخراج: `dist/public`
+- ملفات API: `api/index.ts` و `api/[...path].ts`
+- لا تستخدم `SUPABASE_*` أو `POSTGRES_*` لهذا الإصدار؛ التخزين والتوثيق أصبحا Firebase بالكامل.
