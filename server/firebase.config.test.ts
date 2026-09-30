@@ -5,7 +5,7 @@ import { getDatabase } from "firebase-admin/database";
 const required = ["FIREBASE_PROJECT_ID", "FIREBASE_CLIENT_EMAIL", "FIREBASE_PRIVATE_KEY", "FIREBASE_DATABASE_URL"] as const;
 
 describe("Firebase Admin configuration", () => {
-  it("authenticates against Realtime Database with the supplied service account", async () => {
+  it.skipIf(process.env.FIREBASE_INTEGRATION_TESTS !== "true")("authenticates against Realtime Database with the supplied service account", async () => {
     for (const key of required) expect(process.env[key], `${key} is required`).toBeTruthy();
     const app = getApps()[0] ?? initializeApp({
       credential: cert({

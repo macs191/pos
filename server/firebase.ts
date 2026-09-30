@@ -5,6 +5,22 @@ import { ENV } from "./_core/env";
 
 let firebaseApp: App | null = null;
 
+/**
+ * Firebase Admin v14 exposes the legacy Realtime Database reference API at
+ * runtime, but some dependency trees resolve a type that omits `ref`. Keep
+ * the small API surface used by the repository explicit and stable.
+ */
+export type FirebaseRealtimeReference = {
+  get(): Promise<{ exists(): boolean; val(): unknown }>;
+  transaction(update: (current: unknown) => unknown): Promise<{ snapshot: { val(): unknown } }>;
+  set(value: unknown): Promise<void>;
+  update(values: Record<string, unknown>): Promise<void>;
+};
+
+export type FirebaseRealtimeDatabase = {
+  ref(path?: string): FirebaseRealtimeReference;
+};
+
 function getFirebaseApp() {
   if (firebaseApp) return firebaseApp;
   const existing = getApps()[0];
@@ -30,6 +46,6 @@ export function firebaseAdminAuth(): Auth {
   return getAuth(getFirebaseApp());
 }
 
-export function firebaseRealtimeDb(): Database {
-  return getDatabase(getFirebaseApp());
+export function firebaseRealtimeDb(): FirebaseRealtimeDatabase {
+  return getDatabase(getFirebaseApp()) as unknown as FirebaseRealtimeDatabase;
 }

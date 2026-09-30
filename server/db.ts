@@ -22,7 +22,7 @@ async function readTable<T extends AnyRecord>(table: string): Promise<T[]> {
 }
 
 async function nextId(table: string) {
-  const result = await firebaseRealtimeDb().ref(`_meta/nextIds/${table}`).transaction(current => Number(current || 0) + 1);
+  const result = await firebaseRealtimeDb().ref(`_meta/nextIds/${table}`).transaction((current: unknown) => Number(current || 0) + 1);
   return Number(result.snapshot.val());
 }
 

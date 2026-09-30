@@ -75,7 +75,7 @@ function writeToLogFile(source: LogSource, entries: unknown[]) {
  * - Auto-trimmed when exceeding 1MB (keeps newest entries)
  */
 function vitePluginManusDebugCollector(): Plugin {
-  return {
+  return ({
     name: "manus-debug-collector",
 
     transformIndexHtml(html) {
@@ -147,7 +147,7 @@ function vitePluginManusDebugCollector(): Plugin {
         });
       });
     },
-  };
+  } as Plugin);
 }
 
 const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusRuntime(), vitePluginManusDebugCollector()];
