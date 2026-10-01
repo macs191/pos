@@ -113,5 +113,8 @@ pnpm dev
 - أمر التثبيت: `pnpm install --frozen-lockfile`
 - أمر البناء: `pnpm build`
 - مجلد الإخراج: `dist/public`
-- ملفات API: `api/index.ts` و `api/[...path].ts`
+- **Root Directory:** اتركه فارغًا أو اجعله جذر المستودع الذي يحتوي `package.json` و`vercel.json` و`api/`؛ لا تختَر `client`.
+- ملفات API: `api/index.ts` و`api/[...path].ts` و`api/trpc/[...path].ts`
+- بعد إضافة المتغيرات، نفّذ Redeploy من تبويب Deployments؛ متغيرات `VITE_*` تُضمَّن أثناء البناء ولا تظهر بأثر رجعي في Deployment قديم.
+- للتحقق من نشر API، يجب أن يعيد `POST /api/trpc/auth.me` استجابة tRPC، وليس `404 NOT_FOUND`.
 - لا تستخدم `SUPABASE_*` أو `POSTGRES_*` لهذا الإصدار؛ التخزين والتوثيق أصبحا Firebase بالكامل.
