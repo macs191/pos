@@ -5,19 +5,15 @@
   "framework": null,
   "functions": {
     "api/index.ts": {
-      "runtime": "nodejs22.x",
       "maxDuration": 60
     },
     "api/[...path].ts": {
-      "runtime": "nodejs22.x",
       "maxDuration": 60
     },
     "api/trpc/[...path].ts": {
-      "runtime": "nodejs22.x",
       "maxDuration": 60
     },
     "api/health.ts": {
-      "runtime": "nodejs22.x",
       "maxDuration": 10
     }
   },
