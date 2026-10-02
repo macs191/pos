@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { createContext } from "../server/_core/context";
