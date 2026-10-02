@@ -9,6 +9,7 @@ export function useAuth() {
   const utils = trpc.useUtils();
   const [sessionReady, setSessionReady] = useState(!firebaseAuth);
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [profileReady, setProfileReady] = useState(!firebaseAuth);
 
   const ensureUidProfile = useCallback(async (user: FirebaseUser) => {
     if (!firebaseDatabase) return;
@@ -34,14 +35,22 @@ export function useAuth() {
     return onAuthStateChanged(firebaseAuth, nextUser => {
       setFirebaseUser(nextUser);
       setSessionReady(true);
-      if (nextUser) void ensureUidProfile(nextUser).catch(error => console.error("[Firebase profile]", error));
-      window.setTimeout(() => { void utils.auth.me.invalidate(); }, 0);
+      setProfileReady(!nextUser);
+      if (nextUser) {
+        void ensureUidProfile(nextUser)
+          .then(() => setProfileReady(true))
+          .catch(error => {
+            console.error("[Firebase profile]", error);
+            setProfileReady(true);
+          });
+      }
     });
   }, [ensureUidProfile, utils]);
 
   const meQuery = trpc.auth.me.useQuery(undefined, {
-    enabled: firebaseConfigured ? Boolean(firebaseUser) : false,
-    retry: false,
+    enabled: firebaseConfigured ? Boolean(firebaseUser) && profileReady : false,
+    retry: 3,
+    retryDelay: 700,
     refetchOnWindowFocus: false,
   });
   const logoutMutation = trpc.auth.logout.useMutation({ onSuccess: () => utils.auth.me.setData(undefined, null) });
@@ -69,11 +78,11 @@ export function useAuth() {
 
   const state = useMemo(() => ({
     user: meQuery.data ?? null,
-    loading: !sessionReady || (Boolean(firebaseUser) && meQuery.isLoading) || logoutMutation.isPending,
+    loading: !sessionReady || (Boolean(firebaseUser) && (!profileReady || meQuery.isLoading)) || logoutMutation.isPending,
     error: meQuery.error ?? logoutMutation.error ?? null,
-    sessionIssue: Boolean(firebaseUser) && !meQuery.isLoading && !meQuery.data ? "تم تسجيل الدخول في Firebase، لكن تعذر إنشاء ملف UID في قاعدة البيانات. تحقق من قواعد Realtime Database وإعدادات Firebase Web." : null,
+    sessionIssue: Boolean(firebaseUser) && profileReady && !meQuery.isLoading && !meQuery.data ? `تم تسجيل الدخول في Firebase، لكن تعذر ربط الحساب بالموقع. ${meQuery.error?.message ?? "تحقق من أن API وقواعد Realtime Database منشورة."}` : null,
     isAuthenticated: Boolean(meQuery.data),
-  }), [firebaseUser, logoutMutation.error, logoutMutation.isPending, meQuery.data, meQuery.error, meQuery.isLoading, sessionReady]);
+  }), [firebaseUser, logoutMutation.error, logoutMutation.isPending, meQuery.data, meQuery.error, meQuery.isLoading, profileReady, sessionReady]);
 
   return { ...state, refresh: () => meQuery.refetch(), logout, signIn, signUp, firebaseConfigured };
 }
