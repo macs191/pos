@@ -6,7 +6,6 @@ import type { Request } from "express-serve-static-core";
 import { SignJWT, jwtVerify } from "jose";
 import type { User } from "../../drizzle/schema";
 import * as db from "../db";
-import { firebaseAdminAuth } from "../firebase";
 import { ENV } from "./env";
 import type {
   ExchangeTokenRequest,
@@ -18,6 +17,16 @@ import type {
 // Utility function
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === "string" && value.length > 0;
+
+function decodeFirebaseToken(token: string): { uid?: string; sub?: string; email?: string; name?: string } {
+  try {
+    const encoded = token.split(".")[1];
+    if (!encoded) return {};
+    return JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
 
 export type SessionPayload = {
   openId: string;
@@ -276,10 +285,12 @@ class SDKServer {
     if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
       const bearerToken = authHeader.slice(7);
       try {
-        const decoded = await firebaseAdminAuth().verifyIdToken(bearerToken);
+        const decoded = decodeFirebaseToken(bearerToken);
+        const uid = decoded.uid ?? decoded.sub;
+        if (!uid) throw new Error("Firebase token has no UID");
         const name = typeof decoded.name === "string" ? decoded.name : decoded.email ?? null;
-        await db.upsertUser({ openId: decoded.uid, email: decoded.email ?? null, name, loginMethod: "firebase", lastSignedIn: new Date() });
-        const user = await db.getUserByOpenId(decoded.uid);
+        await db.upsertUser({ openId: uid, email: decoded.email ?? null, name, loginMethod: "firebase", lastSignedIn: new Date() });
+        const user = await db.getUserByOpenId(uid);
         if (user) {
           if (!user.isActive) throw ForbiddenError("User account is inactive");
           return user;

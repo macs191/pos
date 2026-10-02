@@ -61,6 +61,7 @@ export async function upsertUser(input: Partial<User> & { openId: string; name?:
   if (existing) {
     const updated = { ...existing, name: input.name ?? existing.name, email: input.email ?? existing.email, loginMethod: input.loginMethod ?? existing.loginMethod, lastSignedIn: nowIso(), updatedAt: nowIso() };
     await writeRecord("users", { ...updated, createdAt: existing.createdAt.toISOString(), lastSignedIn: updated.lastSignedIn, updatedAt: updated.updatedAt });
+    await writeRecord("profiles", { id: input.openId, uid: input.openId, email: updated.email, name: updated.name, supermarketId: updated.supermarketId, subscriptionId: null, updatedAt: updated.updatedAt });
     return userDates(updated);
   }
 
@@ -81,6 +82,7 @@ export async function upsertUser(input: Partial<User> & { openId: string; name?:
   for (const [table, record] of [["supermarkets", tenant], ["branches", branch], ["users", user], ["subscriptionPlans", plan], ["subscriptions", subscription]] as const) writes[tablePath(table, record.id)] = record;
   writes[`usersByOpenId/${encodeKey(input.openId)}`] = userId;
   await firebaseRealtimeDb().ref().update(writes);
+  await writeRecord("profiles", { id: input.openId, uid: input.openId, email: user.email, name: user.name, supermarketId, subscriptionId, createdAt: timestamp, updatedAt: timestamp });
   return userDates(user);
 }
 

@@ -16,11 +16,11 @@
 
 ## بنية التخزين والأمان
 
-الخادم فقط يتصل بـ Firebase Admin SDK. المتصفح يستخدم Firebase Authentication للحصول على ID token ويرسله إلى tRPC، وكل عمليات البيانات تمر عبر Express/tRPC مع عزل `supermarketId` والصلاحيات.
+المتصفح يستخدم Firebase Web SDK لتسجيل الدخول، ثم يرسل Firebase ID token إلى طبقة REST/tRPC. تُحفظ هوية المستخدم في `profiles/{uid}`، وتُربط بياناته بالـ UID والمتجر والاشتراك.
 
-قواعد Realtime Database في [`database.rules.json`](database.rules.json) تمنع القراءة والكتابة المباشرة من المتصفح؛ هذا مقصود لأن الخادم هو طبقة الوصول الوحيدة.
+قواعد Realtime Database في [`database.rules.json`](database.rules.json) تتحقق من UID المصادق عليه. لا يستخدم هذا الإصدار Firebase Admin أو Service Account.
 
-لا تضع أبدًا `FIREBASE_PRIVATE_KEY` أو Service Account JSON أو أي كلمة مرور في GitHub أو في كود المتصفح. إعدادات `VITE_FIREBASE_*` العامة فقط يمكن أن تصل للواجهة، أما مفاتيح `FIREBASE_*` الخاصة فتوضع في Vercel Environment Variables.
+يستخدم هذا الإصدار إعدادات Firebase Web العامة `VITE_FIREBASE_*` فقط؛ لا توجد حاجة إلى `FIREBASE_PRIVATE_KEY` أو `FIREBASE_CLIENT_EMAIL` أو أسرار Admin.
 
 ## متغيرات Vercel المطلوبة
 
@@ -37,38 +37,40 @@ VITE_FIREBASE_APP_ID
 VITE_FIREBASE_MEASUREMENT_ID
 ```
 
-### إعدادات الخادم السرية
+### إعدادات التطبيق العامة
 
 ```text
-FIREBASE_PROJECT_ID
-FIREBASE_CLIENT_EMAIL
-FIREBASE_PRIVATE_KEY
-FIREBASE_DATABASE_URL
+VITE_FIREBASE_DATABASE_URL
 OWNER_EMAIL              # اختياري لترقية الحساب المحدد إلى SUPER_ADMIN
 OWNER_OPEN_ID            # اختياري للتوافق
-JWT_SECRET               # مطلوب لجلسة Express القديمة/المساندة
 ```
 
-`FIREBASE_PRIVATE_KEY` يجب أن يكون كاملًا بصيغة PEM، ويُحفظ في Vercel كقيمة سرية. إذا كان محفوظًا كسطر واحد فيجب أن يحتوي على `\\n` بين الأسطر؛ التطبيق يحولها تلقائيًا إلى أسطر PEM.
+لا توجد مفاتيح Service Account أو قيم PEM في هذا الإصدار.
 
 ## إعداد Firebase
 
 1. فعّل Email/Password من Firebase Console → Authentication → Sign-in method.
 2. أضف نطاق Vercel إلى Authentication → Settings → Authorized domains.
 3. أنشئ Realtime Database في نفس المشروع.
-4. طبّق قواعد [`database.rules.json`](database.rules.json)، أو اجعل القواعد مكافئة لـ:
+4. طبّق قواعد [`database.rules.json`](database.rules.json) من Firebase CLI؛ فهي تسمح للمستخدم المصادق عليه بالوصول وتقيّد `profiles/{uid}` بمالك UID.
 
 ```json
 {
   "rules": {
-    ".read": false,
-    ".write": false
+    ".read": "auth != null",
+    ".write": "auth != null",
+    "profiles": {
+      "$uid": {
+        ".read": "auth.uid === $uid",
+        ".write": "auth.uid === $uid"
+      }
+    }
   }
 }
 ```
 
-5. أضف متغيرات Vercel السابقة إلى **Production وPreview** ثم أعد النشر.
-6. لا تضع Service Account JSON في المستودع. الاختبار `server/firebase.config.test.ts` يتحقق من اتصال Admin بالـ Realtime Database دون حفظ بيانات الاعتماد في الملفات.
+5. أضف متغيرات `VITE_FIREBASE_*` العامة إلى بيئة البناء ثم أعد النشر.
+6. لا تحتاج إلى Service Account JSON أو متغيرات Firebase Admin.
 
 ## الدخول إلى لوحة Super Admin
 

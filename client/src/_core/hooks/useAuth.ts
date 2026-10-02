@@ -50,7 +50,7 @@ export function useAuth() {
     user: meQuery.data ?? null,
     loading: !sessionReady || (Boolean(firebaseUser) && meQuery.isLoading) || logoutMutation.isPending,
     error: meQuery.error ?? logoutMutation.error ?? null,
-    sessionIssue: Boolean(firebaseUser) && !meQuery.isLoading && !meQuery.data ? "تم تسجيل الدخول في Firebase، لكن تعذر ربط الحساب بالموقع. تحقق من إعدادات Firebase Admin في Vercel." : null,
+    sessionIssue: Boolean(firebaseUser) && !meQuery.isLoading && !meQuery.data ? "تم تسجيل الدخول في Firebase، لكن تعذر إنشاء ملف UID في قاعدة البيانات. تحقق من قواعد Realtime Database وإعدادات Firebase Web." : null,
     isAuthenticated: Boolean(meQuery.data),
   }), [firebaseUser, logoutMutation.error, logoutMutation.isPending, meQuery.data, meQuery.error, meQuery.isLoading, sessionReady]);
 
