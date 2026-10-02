@@ -38,8 +38,18 @@ const trpcClient = trpc.createClient({
       const token = firebaseAuth?.currentUser ? await firebaseAuth.currentUser.getIdToken() : null;
       return token ? { Authorization: `Bearer ${token}` } : {};
     },
-    fetch(input, init) {
-      return globalThis.fetch(input, { ...(init ?? {}), credentials: "include" });
+    async fetch(input, init) {
+      const response = await globalThis.fetch(input, { ...(init ?? {}), credentials: "include" });
+      const contentType = response.headers.get("content-type") ?? "";
+      if (response.ok || contentType.includes("json")) return response;
+      const text = await response.text();
+      const message = response.status === 404 && text.includes("DEPLOYMENT_NOT_FOUND")
+        ? "رابط Vercel الحالي غير موجود أو تم حذفه. افتح رابط الـ Deployment الجديد من Vercel."
+        : `تعذر الاتصال بخادم الموقع (HTTP ${response.status}). ${text.slice(0, 180)}`;
+      return new Response(JSON.stringify([{ error: { json: { message, code: response.status } } }]), {
+        status: response.status,
+        headers: { "content-type": "application/json" },
+      });
     },
   })],
 });
