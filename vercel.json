@@ -15,6 +15,9 @@
     },
     "api/health.ts": {
       "maxDuration": 10
+    },
+    "api/diagnostic.ts": {
+      "maxDuration": 20
     }
   },
   "rewrites": [
