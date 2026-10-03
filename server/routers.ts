@@ -139,7 +139,7 @@ export const appRouter = router({
       if (!store) throw new TRPCError({ code: "NOT_FOUND", message: "المتجر غير موجود." });
       return store;
     }),
-    updateStore: protectedProcedure.input(z.object({ name: z.string().trim().min(2).max(180), phone: z.string().trim().max(40).nullable(), address: z.string().trim().max(500).nullable() })).mutation(async ({ ctx, input }) => {
+    updateStore: protectedProcedure.input(z.object({ name: z.string().trim().min(2).max(180), phone: z.string().trim().max(40).nullable(), secondaryPhone: z.string().trim().max(40).nullable().optional(), address: z.string().trim().max(500).nullable(), receiptHeader: z.string().trim().max(500).nullable().optional(), receiptFooter: z.string().trim().max(500).nullable().optional(), receiptWidth: z.enum(["58mm", "80mm", "A4"]).optional(), showReceiptLogo: z.boolean().optional(), printerName: z.string().trim().max(180).nullable().optional() })).mutation(async ({ ctx, input }) => {
       requireRole(ctx.user.role, catalogRoles);
       try { return await updateStore(tenantId(ctx.user), input, ctx.user.id); } catch (error) { return mapError(error); }
     }),
