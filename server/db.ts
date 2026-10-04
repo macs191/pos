@@ -1,6 +1,6 @@
-import type { User } from "../drizzle/schema";
-import { firebaseRealtimeDb } from "./firebase";
-import { ENV } from "./_core/env";
+import type { User } from "../drizzle/schema.js";
+import { firebaseRealtimeDb } from "./firebase.js";
+import { ENV } from "./_core/env.js";
 
 export const TRIAL_DAYS = 15;
 

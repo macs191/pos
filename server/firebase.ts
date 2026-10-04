@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { ENV } from "./_core/env";
+import { ENV } from "./_core/env.js";
 
 const tokenStorage = new AsyncLocalStorage<string>();
 

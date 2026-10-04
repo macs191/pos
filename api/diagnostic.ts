@@ -1,11 +1,11 @@
 export default async function diagnostic(_req: unknown, res: { status(code: number): { json(body: unknown): void } }) {
   const checks: Record<string, string> = {};
   for (const [name, loader] of Object.entries({
-    firebase: () => import("../server/firebase"),
-    database: () => import("../server/db"),
-    sdk: () => import("../server/_core/sdk"),
-    context: () => import("../server/_core/context"),
-    router: () => import("../server/routers"),
+    firebase: () => import("../server/firebase.js"),
+    database: () => import("../server/db.js"),
+    sdk: () => import("../server/_core/sdk.js"),
+    context: () => import("../server/_core/context.js"),
+    router: () => import("../server/routers.js"),
   })) {
     try {
       await loader();

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { addProductToCart, cartSubtotal, invoiceTotal } from "../shared/pos";
-import { buildInvoiceAnnouncement, isNewInvoiceVoiceCommand, isSaveVoiceCommand, parseVoiceProductPhrase } from "../shared/voice";
+import { addProductToCart, cartSubtotal, invoiceTotal } from "../shared/pos.js";
+import { buildInvoiceAnnouncement, isNewInvoiceVoiceCommand, isSaveVoiceCommand, parseVoiceProductPhrase } from "../shared/voice.js";
 
 describe("POS cart logic", () => {
   const product = {
