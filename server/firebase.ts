@@ -1,6 +1,6 @@
 import { applicationDefault, cert, getApps, initializeApp, type App } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
-import { getDatabase, type Database, type Reference } from "firebase-admin/database";
+import { getDatabase, type Reference } from "firebase-admin/database";
 import { ENV } from "./_core/env.js";
 
 let firebaseApp: App | null = null;
@@ -70,14 +70,16 @@ function wrapReference(reference: Reference): FirebaseRealtimeReference {
       await reference.update(values);
     },
     async transaction(update) {
-      const result = await reference.transaction(current => update(current), undefined, false);
+      const result = await reference.transaction((current: unknown) => update(current), undefined, false);
       return { committed: result.committed, snapshot: { val: () => result.snapshot.val() } };
     },
   };
 }
 
 export function firebaseRealtimeDb(): FirebaseRealtimeDatabase {
-  const database: Database = getDatabase(getAdminApp());
+  // Firebase Admin's database declaration differs between some Vercel TS
+  // resolver versions; its runtime Database still exposes the documented ref().
+  const database = getDatabase(getAdminApp()) as unknown as { ref(path?: string): Reference };
   return { ref: (path = "") => wrapReference(database.ref(path)) };
 }
 
