@@ -125,7 +125,12 @@ export const appRouter = router({
       try { return await updateStore(tenantId(ctx.user), input, ctx.user.id); } catch (error) { return mapError(error); }
     }),
   }),
-  users: router({ list: protectedProcedure.query(({ ctx }) => listUsers(tenantId(ctx.user))) }),
+  users: router({
+    list: protectedProcedure.query(({ ctx }) => {
+      requireRole(ctx.user.role, catalogRoles);
+      return listUsers(tenantId(ctx.user));
+    }),
+  }),
   superAdmin: router({
     overview: protectedProcedure.query(async ({ ctx }) => { requireRole(ctx.user.role, new Set(["SUPER_ADMIN"])); return globalMetrics(); }),
     plans: protectedProcedure.query(async ({ ctx }) => { requireRole(ctx.user.role, new Set(["SUPER_ADMIN"])); return listPlans(); }),
