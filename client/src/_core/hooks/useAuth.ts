@@ -1,8 +1,7 @@
-import { firebaseAuth, firebaseConfigured, firebaseDatabase } from "@/lib/firebase";
+import { firebaseAuth, firebaseConfigured } from "@/lib/firebase";
 import { trpc } from "@/lib/trpc";
 import { TRPCClientError } from "@trpc/client";
 import { createUserWithEmailAndPassword, onAuthStateChanged, signInWithEmailAndPassword, signOut, updateProfile, type User as FirebaseUser } from "firebase/auth";
-import { get, ref, set } from "firebase/database";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 export function useAuth() {
@@ -11,41 +10,14 @@ export function useAuth() {
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [profileReady, setProfileReady] = useState(!firebaseAuth);
 
-  const ensureUidProfile = useCallback(async (user: FirebaseUser) => {
-    if (!firebaseDatabase) return;
-    const profileRef = ref(firebaseDatabase, `profiles/${user.uid}`);
-    const existing = await get(profileRef);
-    if (existing.exists()) return;
-    const now = new Date().toISOString();
-    await set(profileRef, {
-      uid: user.uid,
-      email: user.email ?? null,
-      name: user.displayName ?? null,
-      businessName: user.displayName ? `متجر ${user.displayName}` : "متجري",
-      phone: null,
-      address: null,
-      subscription: { status: "ACTIVE", plan: "FREE", startDate: now, endDate: new Date(Date.now() + 15 * 86400000).toISOString() },
-      createdAt: now,
-      updatedAt: now,
-    });
-  }, []);
-
   useEffect(() => {
     if (!firebaseAuth) return;
     return onAuthStateChanged(firebaseAuth, nextUser => {
       setFirebaseUser(nextUser);
       setSessionReady(true);
-      setProfileReady(!nextUser);
-      if (nextUser) {
-        void ensureUidProfile(nextUser)
-          .then(() => setProfileReady(true))
-          .catch(error => {
-            console.error("[Firebase profile]", error);
-            setProfileReady(true);
-          });
-      }
+      setProfileReady(true);
     });
-  }, [ensureUidProfile, utils]);
+  }, []);
 
   const meQuery = trpc.auth.me.useQuery(undefined, {
     enabled: firebaseConfigured ? Boolean(firebaseUser) && profileReady : false,
