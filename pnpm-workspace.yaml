@@ -31,4 +31,3 @@ overrides:
   "postcss": "8.5.23"
   "rollup": "4.59.0"
   "picomatch": "4.0.4"
-  "jwks-rsa>jose": "5.10.0"

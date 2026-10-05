@@ -1,6 +1,166 @@
 {
   "rules": {
     ".read": false,
-    ".write": false
+    ".write": false,
+    "adminUids": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || root.child('adminUids').child(auth.uid).val() === true)",
+        ".write": "auth != null && root.child('adminUids').child(auth.uid).val() === true",
+        ".validate": "newData.isBoolean()"
+      }
+    },
+    "usersByUid": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || root.child('adminUids').child(auth.uid).val() === true)",
+        ".write": "auth != null && (root.child('adminUids').child(auth.uid).val() === true || (auth.uid === $uid && newData.isNumber() && root.child('users').child(newData.val() + '').child('openId').val() === auth.uid && (!data.exists() || data.val() === newData.val())))",
+        ".validate": "newData.isNumber()"
+      }
+    },
+    "usersByOpenId": {
+      ".read": "auth != null && root.child('adminUids').child(auth.uid).val() === true",
+      ".write": "auth != null && root.child('adminUids').child(auth.uid).val() === true"
+    },
+    "users": {
+      ".indexOn": [
+        "openId",
+        "supermarketId"
+      ],
+      ".read": "auth != null && (root.child('adminUids').child(auth.uid).val() === true || (query.orderByChild === 'openId' && query.equalTo === auth.uid) || (query.orderByChild === 'supermarketId' && query.equalTo === root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('supermarketId').val() && (root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('role').val() === 'OWNER' || root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('role').val() === 'ADMIN')))",
+      "$id": {
+        ".read": "auth != null && (root.child('adminUids').child(auth.uid).val() === true || data.child('openId').val() === auth.uid || (data.child('supermarketId').val() === root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('supermarketId').val() && (root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('role').val() === 'OWNER' || root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('role').val() === 'ADMIN')))",
+        ".write": "auth != null && (root.child('adminUids').child(auth.uid).val() === true || (!data.exists() && newData.child('openId').val() === auth.uid && ((newData.child('role').val() === 'OWNER' && newData.child('supermarketId').exists() && root.child('supermarkets').child(newData.child('supermarketId').val() + '').child('ownerUid').val() === auth.uid) || (root.child('adminUids').child(auth.uid).val() === true && newData.child('role').val() === 'SUPER_ADMIN' && !newData.child('supermarketId').exists()))) || (data.child('openId').val() === auth.uid && newData.child('openId').val() === auth.uid && ((newData.child('supermarketId').val() === data.child('supermarketId').val() && newData.child('branchId').val() === data.child('branchId').val() && newData.child('isActive').val() === data.child('isActive').val() && newData.child('role').val() === data.child('role').val()) || (!data.child('supermarketId').exists() && newData.child('role').val() === 'OWNER' && root.child('supermarkets').child(newData.child('supermarketId').val() + '').child('ownerUid').val() === auth.uid) || (data.child('role').val() === 'SUPER_ADMIN' && newData.child('role').val() === 'OWNER' && root.child('adminUids').child(auth.uid).val() !== true && newData.child('supermarketId').val() === data.child('supermarketId').val()))))",
+        ".validate": "newData.hasChildren(['id', 'openId', 'role', 'isActive']) && newData.child('openId').isString() && newData.child('isActive').isBoolean()"
+      }
+    },
+    "supermarkets": {
+      ".read": "auth != null && root.child('adminUids').child(auth.uid).val() === true",
+      "$id": {
+        ".read": "auth != null && (root.child('adminUids').child(auth.uid).val() === true || data.child('ownerUid').val() === auth.uid || data.child('id').val() === root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('supermarketId').val())",
+        ".write": "auth != null && (root.child('adminUids').child(auth.uid).val() === true || (!data.exists() && newData.child('ownerUid').val() === auth.uid && newData.child('id').val() + '' === $id) || (data.exists() && data.child('id').val() + '' === $id && data.child('supermarketId').val() === root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('supermarketId').val() && (root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('role').val() === 'OWNER' || root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('role').val() === 'ADMIN') && newData.child('ownerUid').val() === data.child('ownerUid').val() && newData.child('status').val() === data.child('status').val()))",
+        ".validate": "newData.hasChildren(['id', 'name', 'status']) && newData.child('name').isString() && newData.child('status').isString()"
+      }
+    },
+    "branches": {
+      ".indexOn": [
+        "supermarketId"
+      ],
+      ".read": "auth != null && (root.child('adminUids').child(auth.uid).val() === true || (query.orderByChild === 'supermarketId' && query.equalTo === root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('supermarketId').val()))",
+      "$id": {
+        ".read": "auth != null && (root.child('adminUids').child(auth.uid).val() === true || data.child('supermarketId').val() === root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('supermarketId').val() || root.child('supermarkets').child(data.child('supermarketId').val() + '').child('ownerUid').val() === auth.uid)",
+        ".write": "auth != null && (root.child('adminUids').child(auth.uid).val() === true || (!data.exists() && root.child('supermarkets').child(newData.child('supermarketId').val() + '').child('ownerUid').val() === auth.uid))",
+        ".validate": "newData.hasChildren(['id', 'supermarketId', 'name']) && newData.child('supermarketId').isNumber()"
+      }
+    },
+    "subscriptions": {
+      ".indexOn": [
+        "supermarketId"
+      ],
+      ".read": "auth != null && (root.child('adminUids').child(auth.uid).val() === true || (query.orderByChild === 'supermarketId' && query.equalTo === root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('supermarketId').val()))",
+      "$id": {
+        ".read": "auth != null && (root.child('adminUids').child(auth.uid).val() === true || data.child('supermarketId').val() === root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('supermarketId').val() || root.child('supermarkets').child(data.child('supermarketId').val() + '').child('ownerUid').val() === auth.uid)",
+        ".write": "auth != null && (root.child('adminUids').child(auth.uid).val() === true || (!data.exists() && $id === newData.child('supermarketId').val() + '' && root.child('supermarkets').child($id).child('ownerUid').val() === auth.uid && newData.child('status').val() === 'ACTIVE' && newData.child('paymentStatus').val() === 'UNPAID' && newData.child('endAt').isNumber() && newData.child('endAt').val() >= now && newData.child('endAt').val() <= now + 1296000000))",
+        ".validate": "newData.hasChildren(['id', 'supermarketId', 'planId', 'status', 'paymentStatus']) && newData.child('supermarketId').isNumber()"
+      }
+    },
+    "subscriptionPlans": {
+      ".read": "auth != null",
+      ".write": "auth != null && root.child('adminUids').child(auth.uid).val() === true",
+      ".indexOn": [
+        "price"
+      ]
+    },
+    "catalogProducts": {
+      ".read": "auth != null",
+      "$barcode": {
+        ".write": "auth != null && (root.child('adminUids').child(auth.uid).val() === true || (!data.exists() && newData.child('id').val() === $barcode && newData.child('barcode').val() === $barcode && newData.child('createdByUid').val() === auth.uid))",
+        ".validate": "newData.hasChildren(['id', 'barcode', 'name', 'sellingPrice', 'isActive']) && newData.child('id').val() === $barcode && newData.child('barcode').isString() && newData.child('name').isString() && newData.child('sellingPrice').isNumber() && newData.child('sellingPrice').val() >= 0 && newData.child('isActive').isBoolean() && (root.child('adminUids').child(auth.uid).val() === true || (newData.child('barcode').val() === $barcode && newData.child('createdByUid').val() === auth.uid))"
+      }
+    },
+    "catalogProductByBarcode": {
+      ".read": "auth != null",
+      ".write": "auth != null && root.child('adminUids').child(auth.uid).val() === true"
+    },
+    "priceChangeRequests": {
+      ".indexOn": [
+        "supermarketId",
+        "status",
+        "submittedByUid"
+      ],
+      ".read": "auth != null && (root.child('adminUids').child(auth.uid).val() === true || (query.orderByChild === 'supermarketId' && query.equalTo === root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('supermarketId').val()))",
+      "$id": {
+        ".read": "auth != null && (root.child('adminUids').child(auth.uid).val() === true || (data.child('supermarketId').val() === root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('supermarketId').val() && data.child('submittedByUid').val() === auth.uid))",
+        ".write": "auth != null && (root.child('adminUids').child(auth.uid).val() === true || (!data.exists() && newData.child('submittedByUid').val() === auth.uid && newData.child('supermarketId').val() === root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('supermarketId').val() && newData.child('status').val() === 'PENDING'))",
+        ".validate": "newData.hasChildren(['id', 'productId', 'barcode', 'proposedPrice', 'submittedByUid', 'supermarketId', 'status']) && newData.child('proposedPrice').isNumber() && newData.child('proposedPrice').val() >= 0"
+      }
+    },
+    "invoices": {
+      ".indexOn": [
+        "supermarketId",
+        "createdAt"
+      ],
+      ".read": "auth != null && (root.child('adminUids').child(auth.uid).val() === true || (query.orderByChild === 'supermarketId' && query.equalTo === root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('supermarketId').val()))",
+      "$id": {
+        ".read": "auth != null && (root.child('adminUids').child(auth.uid).val() === true || data.child('supermarketId').val() === root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('supermarketId').val())",
+        ".write": "auth != null && (root.child('adminUids').child(auth.uid).val() === true || (!data.exists() && newData.child('supermarketId').val() === root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('supermarketId').val() && newData.child('cashierId').val() === root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('id').val() && newData.child('status').val() === 'PAID'))",
+        ".validate": "newData.hasChildren(['id', 'supermarketId', 'cashierId', 'invoiceNumber', 'total', 'status']) && newData.child('supermarketId').isNumber() && newData.child('total').isNumber() && newData.child('total').val() >= 0"
+      }
+    },
+    "invoiceItems": {
+      ".indexOn": [
+        "supermarketId",
+        "invoiceId"
+      ],
+      ".read": "auth != null && (root.child('adminUids').child(auth.uid).val() === true || (query.orderByChild === 'supermarketId' && query.equalTo === root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('supermarketId').val()))",
+      "$id": {
+        ".read": "auth != null && (root.child('adminUids').child(auth.uid).val() === true || data.child('supermarketId').val() === root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('supermarketId').val())",
+        ".write": "auth != null && (root.child('adminUids').child(auth.uid).val() === true || (!data.exists() && newData.child('supermarketId').val() === root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('supermarketId').val()))",
+        ".validate": "newData.hasChildren(['id', 'supermarketId', 'invoiceId', 'productId', 'quantity', 'total']) && newData.child('supermarketId').isNumber() && newData.child('quantity').isNumber() && newData.child('quantity').val() > 0"
+      }
+    },
+    "auditLogs": {
+      ".read": "auth != null && root.child('adminUids').child(auth.uid).val() === true",
+      "$id": {
+        ".write": "auth != null && (root.child('adminUids').child(auth.uid).val() === true || (!data.exists() && newData.child('supermarketId').val() === root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('supermarketId').val()))"
+      }
+    },
+    "products": {
+      ".indexOn": [
+        "supermarketId",
+        "barcode"
+      ],
+      ".read": "auth != null && (root.child('adminUids').child(auth.uid).val() === true || (query.orderByChild === 'supermarketId' && query.equalTo === root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('supermarketId').val()))",
+      "$id": {
+        ".read": "auth != null && (root.child('adminUids').child(auth.uid).val() === true || data.child('supermarketId').val() === root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('supermarketId').val())",
+        ".write": "auth != null && root.child('adminUids').child(auth.uid).val() === true"
+      }
+    },
+    "categories": {
+      ".read": "auth != null && root.child('adminUids').child(auth.uid).val() === true",
+      ".write": "auth != null && root.child('adminUids').child(auth.uid).val() === true"
+    },
+    "inventoryMovements": {
+      ".indexOn": [
+        "supermarketId"
+      ],
+      ".read": "auth != null && root.child('adminUids').child(auth.uid).val() === true",
+      ".write": "auth != null && root.child('adminUids').child(auth.uid).val() === true"
+    },
+    "profiles": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || root.child('adminUids').child(auth.uid).val() === true)",
+        ".write": "auth != null && root.child('adminUids').child(auth.uid).val() === true"
+      }
+    },
+    "_meta": {
+      ".read": "auth != null && root.child('adminUids').child(auth.uid).val() === true",
+      ".write": "auth != null && root.child('adminUids').child(auth.uid).val() === true"
+    },
+    "legacyCatalogMigrations": {
+      "$id": {
+        ".read": "auth != null && (root.child('adminUids').child(auth.uid).val() === true || root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('supermarketId').val() + '' === $id)",
+        ".write": "auth != null && (root.child('adminUids').child(auth.uid).val() === true || (!data.exists() && newData.child('completed').val() === true && newData.child('completedByUid').val() === auth.uid && newData.child('supermarketId').val() + '' === $id && newData.child('supermarketId').val() === root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('supermarketId').val() && (root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('role').val() === 'OWNER' || root.child('users').child(root.child('usersByUid').child(auth.uid).val() + '').child('role').val() === 'ADMIN')))",
+        ".validate": "newData.hasChildren(['supermarketId', 'completed', 'completedByUid', 'completedAt']) && newData.child('supermarketId').isNumber() && newData.child('completed').isBoolean() && newData.child('completedAt').isString()"
+      }
+    }
   }
 }

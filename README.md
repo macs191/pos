@@ -17,11 +17,11 @@
 
 ## بنية التخزين والأمان
 
-المتصفح يستخدم Firebase Web SDK لتسجيل الدخول ويرسل Firebase ID token إلى API. يتحقق الخادم من الرمز عبر Firebase Admin SDK، وتُنفذ كل عمليات قاعدة البيانات بصلاحية الخدمة. لا يقرأ العميل بيانات المنصة ولا يكتب فيها مباشرة.
+المتصفح يستخدم Firebase Web SDK لتسجيل الدخول ويرسل Firebase ID token إلى API. يتحقق الخادم من الرمز عبر Firebase Authentication Identity Toolkit REST API، ثم يمرر الرمز نفسه إلى Realtime Database REST API؛ لذلك تُطبق Firebase Security Rules على كل عملية بصفة المستخدم نفسه، دون Firebase Admin SDK أو حساب خدمة.
 
-قواعد Realtime Database في [`database.rules.json`](database.rules.json) ترفض الوصول المباشر من العملاء. صلاحيات Firebase Admin سرية وخادمية فقط.
+قواعد Realtime Database في [`database.rules.json`](database.rules.json) تمنع القراءة والكتابة غير المقيدة. تربط بيانات المتجر والفواتير بطلبات المستخدم الموثق، وتتيح قراءة الكتالوج العالمي للمستخدمين المسجلين، مع السماح بإنشاء المنتج فقط دون تعديل منتج سابق. تغييرات الأسعار تظل طلبات تنتظر اعتماد المدير. إذا كان المتجر يستخدم قائمة المنتجات القديمة، تُرحّل المنتجات الرقمية الصالحة تلقائيًا مرة واحدة عند أول فتح لقائمة المنتجات بواسطة المالك أو المدير؛ لا تُنقل كميات مخزون أو بيانات ميزان.
 
-يتطلب الخادم `FIREBASE_SERVICE_ACCOUNT_JSON` (أو Google Application Default Credentials في البيئة المناسبة) مع `FIREBASE_DATABASE_URL` و`FIREBASE_PROJECT_ID`. لا تضع ملف الحساب أو مفتاحه في Git أو في متغيرات `VITE_*`.
+هذا التصميم لا يحتاج `FIREBASE_SERVICE_ACCOUNT_JSON` أو ملف مفاتيح. يجب نشر قواعد RTDB الجديدة قبل تشغيل الإصدار، وضبط إعدادات Firebase Web العامة في Vercel.
 
 ## متغيرات Vercel المطلوبة
 
@@ -38,37 +38,37 @@ VITE_FIREBASE_APP_ID
 VITE_FIREBASE_MEASUREMENT_ID
 ```
 
-### إعدادات التطبيق العامة
+### إعدادات خادمية اختيارية (قيم عامة، وليست مفاتيح خدمة)
 
 ```text
-FIREBASE_DATABASE_URL
-FIREBASE_PROJECT_ID
-FIREBASE_SERVICE_ACCOUNT_JSON # سر خادمي: JSON حساب خدمة Firebase في سطر واحد، لا تضعه في Git أو متغيرات VITE_
-OWNER_EMAIL              # اختياري لترقية الحساب المحدد إلى SUPER_ADMIN
-OWNER_OPEN_ID            # اختياري للتوافق
+FIREBASE_DATABASE_URL     # اختياري إذا كان VITE_FIREBASE_DATABASE_URL مضبوطًا
+FIREBASE_PROJECT_ID       # اختياري إذا كان VITE_FIREBASE_PROJECT_ID مضبوطًا
 ```
 
-إعدادات الويب `VITE_FIREBASE_*` ليست أسرارًا. `FIREBASE_SERVICE_ACCOUNT_JSON` سر كامل الصلاحية: خزّنه في Vercel Project Settings → Environment Variables فقط، وأعد النشر بعد إضافته.
+إعدادات `VITE_FIREBASE_*` هي إعدادات Web SDK العامة، وليست حساب خدمة. لا تضف مفتاحًا خاصًا أو JSON service account؛ لم يعد التطبيق يستخدمهما.
 
 ## إعداد Firebase
 
 1. فعّل Email/Password من Firebase Console → Authentication → Sign-in method.
 2. أضف نطاق Vercel إلى Authentication → Settings → Authorized domains.
 3. أنشئ Realtime Database في نفس المشروع.
-4. أنشئ حساب خدمة من Firebase Console → Project settings → Service accounts، ثم خزّن JSON كمتغير خادمي `FIREBASE_SERVICE_ACCOUNT_JSON`، مع `FIREBASE_DATABASE_URL` و`FIREBASE_PROJECT_ID`.
+4. انشر قواعد [`database.rules.json`](database.rules.json) إلى Realtime Database، مثلًا عبر Firebase CLI: `firebase deploy --only database` بعد اختيار مشروع Firebase الصحيح.
 
-تأكد من نشر القواعد الموجودة في `database.rules.json`؛ وهي تمنع وصول Firebase Web SDK مباشرة، بينما يستخدم الخادم Firebase Admin SDK بصلاحيات حساب الخدمة.
+5. بعد إنشاء حساب مدير الموقع وتسجيل دخوله مرة واحدة، انسخ **UID** من Firebase Authentication → Users، ثم أضف في Realtime Database → Data قيمة `true` في المسار `adminUids/<UID>` (من لوحة Firebase Console فقط). لا تضف UID من مدخلات المستخدم ولا تستخدم البريد وحده لتعيين المدير. هذا الإدخال اليدوي هو مصدر صلاحية Super Admin.
 
-5. أضف متغيرات `VITE_FIREBASE_*` العامة إلى بيئة البناء، والمتغيرات الخادمية المذكورة أعلاه إلى إعدادات Vercel ثم أعد النشر.
+6. أضف متغيرات `VITE_FIREBASE_*` إلى بيئات Vercel المطلوبة ثم نفّذ Redeploy؛ متغيرات VITE تُضمّن أثناء البناء.
 
 ## الدخول إلى لوحة Super Admin
 
-الحساب الذي يطابق `OWNER_EMAIL` الموثق في Firebase (أو `OWNER_OPEN_ID`) يصبح `SUPER_ADMIN`. أنشئ الحساب في Firebase Authentication وسجّل دخوله؛ ينشئ الخادم ملف المتجر والمستخدم. إذا بقي حساب قديم بلا `supermarketId`، أعد تسجيل الدخول ليُصلح الربط تلقائيًا.
+يُمنح دور `SUPER_ADMIN` فقط للحساب الذي يطابق UID موجودًا بقيمة `true` في `adminUids`. أضف هذا الإدخال من Firebase Console كما سبق، ثم سجّل خروجًا ودخولًا مجددًا. المستخدم العادي يُنشأ له متجر وفرع واشتراك تجريبي تلقائيًا، ويرتبط الحساب بمتجره عبر Firebase UID.
+
+**حدود التصميم دون Admin SDK:** المستخدمون الموثقون يستطيعون اقتراح منتجات جديدة تظهر في الكتالوج العالمي، وإنشاء فواتير داخل متجرهم. القواعد تمنع المستخدم العادي من تعديل منتجات سبق إنشاؤها أو تعديل فواتير موجودة أو قراءة بيانات متجر آخر؛ لكنها لا تمنع مالك/كاشير متجر من إنشاء معاملات غير صحيحة داخل متجره، كما وافق مالك المشروع. لا تمنح UID المدير إلا لحساب تملكه.
 
 يمكن لـ Super Admin:
 
 - مشاهدة مؤشرات المتاجر والمستخدمين والمنتجات والفواتير والاشتراكات المدفوعة وغير المدفوعة.
 - تفعيل أو تعطيل المستخدمين وتعديل أدوارهم.
+- لا يمكن منح دور `SUPER_ADMIN` من هذه القائمة؛ تعيينه محصور في UID المدير الذي تضيفه يدويًا إلى `adminUids` من Firebase Console.
 - تغيير حالة الاشتراك وتاريخ الانتهاء.
 - تعديل بيانات المتاجر والمنتجات العامة، وتعطيل المنتج أو تفعيله.
 - مراجعة طلبات تغيير الأسعار واعتمادها أو رفضها.
@@ -98,7 +98,16 @@ pnpm build
 pnpm dev
 ```
 
-الاختبارات تشمل تسجيل الخروج ومنطق السلة والإجمالي. اتصال Firebase Admin الفعلي يحتاج متغيرات الخدمة السرية الموثقة أعلاه.
+الاختبارات تشمل تسجيل الخروج ومنطق السلة والإجمالي وفحوص قواعد Firebase ومصادقة REST. لا تتطلب متغيرات حساب خدمة.
+
+لاختبار قرارات القواعد نفسها عبر Firebase Emulator (بعد تثبيت Firebase CLI):
+
+```bash
+firebase emulators:exec --project demo-pos --only database \
+  "FIREBASE_DATABASE_EMULATOR_HOST=127.0.0.1:9000 pnpm vitest run server/firebase.rules.integration.test.ts"
+```
+
+يقرأ CLI القواعد والمنفذ من `firebase.json`. اختبارات المحاكي لا تتصل بمشروع Firebase الحقيقي، وتُتخطى ضمن `pnpm test` العادي إذا لم يكن المحاكي نشطًا.
 
 ## النشر على Vercel
 
@@ -110,7 +119,3 @@ pnpm dev
 - بعد إضافة المتغيرات، نفّذ Redeploy من تبويب Deployments؛ متغيرات `VITE_*` تُضمَّن أثناء البناء ولا تظهر بأثر رجعي في Deployment قديم.
 - للتحقق من نشر API، يجب أن يعيد `POST /api/trpc/auth.me` استجابة tRPC، وليس `404 NOT_FOUND`.
 - لا تستخدم `SUPABASE_*` أو `POSTGRES_*` لهذا الإصدار؛ التخزين والتوثيق أصبحا Firebase بالكامل.
-
-### تحميل ملف البيئة في الاختبار
-
-تستدعي ملفات `api/index.ts` و`api/trpc/[...path].ts` `dotenv/config` عند بدء التشغيل، لذلك تُقرأ قيم ملف `.env` الموجود في جذر المشروع تلقائيًا في بيئة اختبار تتيح تضمينه. في Vercel تُقرأ القيم من بيئة Function إذا لم يكن ملف `.env` موجودًا. لا تُضمّن قيم Service Account الحقيقية في هذا المستودع؛ استخدم قالب `.env.template` للمتغيرات فقط.
