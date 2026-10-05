@@ -4,6 +4,7 @@ import { addProductToCart, cartSubtotal } from "@shared/pos";
 import { buildInvoiceAnnouncement, isNewInvoiceVoiceCommand, isSaveVoiceCommand, parseVoiceProductPhrase } from "@shared/voice";
 import { BarcodeCameraScanner } from "@/components/BarcodeCameraScanner";
 import { VoiceCommandButton, speakArabic } from "@/components/VoiceCommandButton";
+import { GlobalVoiceAssistant } from "@/components/GlobalVoiceAssistant";
 import {
   Activity,
   ArrowDownLeft,
@@ -146,7 +147,7 @@ function StatCard({ label, value, note, icon, tone }: { label: string; value: st
 }
 
 function Header({ title, subtitle, navigate, onLogout }: { title: string; subtitle: string; navigate: (path: string) => void; onLogout: () => void }) {
-  return <header className="sticky top-0 z-20 flex h-[76px] items-center justify-between border-b border-[#dfe9e5] bg-[#f2f6f4]/95 px-4 backdrop-blur sm:px-8"><div className="flex items-center gap-3"><button onClick={() => navigate("/pos")} className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#071723] text-[#b8efdc] lg:hidden"><Menu size={19} /></button><div><h1 className="text-lg font-extrabold tracking-tight text-[#172b36] sm:text-xl">{title}</h1><p className="mt-0.5 text-[11px] font-semibold text-[#7b8c8e]">{subtitle}</p></div></div><div className="flex items-center gap-2 sm:gap-3"><div className="hidden text-left sm:block"><div className="text-xs font-bold text-[#4d656a]">{today()}</div><div className="mt-0.5 text-[10px] text-[#92a1a2]">آخر مزامنة منذ لحظات</div></div><IconButton label="الإشعارات"><Bell size={18} /></IconButton><button onClick={onLogout} className="hidden h-10 items-center gap-2 rounded-xl border border-[#dbe5e1] bg-white px-3 text-xs font-bold text-[#587074] hover:text-[#bd4448] md:flex"><LogOut size={15} /> خروج</button></div></header>;
+  return <header className="sticky top-0 z-20 flex h-[76px] items-center justify-between border-b border-[#dfe9e5] bg-[#f2f6f4]/95 px-4 backdrop-blur sm:px-8"><div className="flex items-center gap-3"><button onClick={() => navigate("/pos")} className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#071723] text-[#b8efdc] lg:hidden"><Menu size={19} /></button><div><h1 className="text-lg font-extrabold tracking-tight text-[#172b36] sm:text-xl">{title}</h1><p className="mt-0.5 text-[11px] font-semibold text-[#7b8c8e]">{subtitle}</p></div></div><div className="flex items-center gap-2 sm:gap-3"><GlobalVoiceAssistant navigate={navigate} /><div className="hidden text-left sm:block"><div className="text-xs font-bold text-[#4d656a]">{today()}</div><div className="mt-0.5 text-[10px] text-[#92a1a2]">آخر مزامنة منذ لحظات</div></div><IconButton label="الإشعارات"><Bell size={18} /></IconButton><button onClick={onLogout} className="hidden h-10 items-center gap-2 rounded-xl border border-[#dbe5e1] bg-white px-3 text-xs font-bold text-[#587074] hover:text-[#bd4448] md:flex"><LogOut size={15} /> خروج</button></div></header>;
 }
 
 function EmptyState({ icon, title, body }: { icon: ReactNode; title: string; body: string }) {
@@ -285,6 +286,11 @@ function PosView({ role, userId }: { role: string; userId: number }) {
       toast.error(error instanceof Error ? error.message : "تعذر البحث عن المنتج بالصوت.");
     }
   }, [clearCart, pendingVoiceName, submitInvoice, voiceInvoiceMode, voiceLookup]);
+  useEffect(() => {
+    const listener = (event: Event) => { const transcript = (event as CustomEvent<string>).detail; if (transcript) void handleVoiceCommand(transcript); };
+    window.addEventListener("pos:voice-command", listener);
+    return () => window.removeEventListener("pos:voice-command", listener);
+  }, [handleVoiceCommand]);
 
   return <div className="space-y-5"><div className="flex items-center justify-between rounded-2xl border border-[#dce9e4] bg-white px-4 py-3"><div><div className="text-sm font-extrabold text-[#29464e]">تحكم صوتي بالفاتورة</div><div className="text-[11px] text-[#829394]">قل: اعمل فاتورة جديدة، ثم اسم المنتج، ثم احفظ</div></div><VoiceCommandButton onTranscript={handleVoiceCommand} prompt={voiceInvoiceMode ? "قل اسم المنتج أو قل احفظ" : "قل اعمل فاتورة جديدة"} /></div>
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1.38fr)_minmax(340px,0.62fr)]">
@@ -331,14 +337,14 @@ function ProductsView() {
       setForm({ name: product.name, barcode: product.barcode, sellingPrice: String(product.sellingPrice), stockQuantity: String(product.stockQuantity), minimumStock: String(product.minimumStock) });
       toast.info("هذا الباركود محفوظ بالفعل", { description: "تم فتح المنتج للتعديل مباشرة." });
     },
-    onError: () => { setVoiceProductField("name"); speakArabic("الباركود جديد. ما اسم المنتج؟"); },
+    onError: error => { if (error.data?.code === "NOT_FOUND") { setVoiceProductField("name"); speakArabic("الباركود جديد. ما اسم المنتج؟"); } else toast.error(error.message); },
   });
   const handleProductCamera = (value: string) => { setCameraOpen(false); setForm(current => ({ ...current, barcode: value })); duplicateLookup.mutate({ barcode: value }); };
   const resetForm = () => { setEditingId(null); setForm({ name: "", barcode: "", sellingPrice: "", stockQuantity: "", minimumStock: "5" }); };
   const create = trpc.products.create.useMutation({ onSuccess: () => { toast.success("تمت إضافة المنتج"); resetForm(); void products.refetch(); }, onError: error => toast.error(error.message) });
   const update = trpc.products.update.useMutation({ onSuccess: () => { toast.success("تم تعديل المنتج"); resetForm(); void products.refetch(); }, onError: error => toast.error(error.message) });
-  const payload = { name: form.name, barcode: form.barcode, sellingPrice: Number(form.sellingPrice), costPrice: 0, stockQuantity: Number(form.stockQuantity || 0), minimumStock: Number(form.minimumStock || 5), unit: "قطعة" as const };
-  const submit = (event: React.FormEvent) => { event.preventDefault(); if (editingId) update.mutate({ ...payload, id: editingId }); else create.mutate(payload); };
+  const payload = { name: form.name.trim(), barcode: form.barcode.trim(), sellingPrice: Number(form.sellingPrice), costPrice: 0, stockQuantity: Number(form.stockQuantity || 0), minimumStock: Number(form.minimumStock || 5), unit: "قطعة" as const };
+  const submit = (event: React.FormEvent) => { event.preventDefault(); if (!payload.name || payload.barcode.length < 3 || !Number.isFinite(payload.sellingPrice)) { toast.error("أكمل اسم المنتج والباركود والسعر بشكل صحيح."); return; } if (editingId) update.mutate({ ...payload, id: editingId }); else create.mutate(payload); };
   const checkBarcode = () => { const value = form.barcode.trim(); if (value.length >= 3) duplicateLookup.mutate({ barcode: value }); };
   const handleProductVoice = (transcript: string) => {
     if (voiceProductField === "name") {
@@ -373,6 +379,14 @@ function InvoicesView() {
 function InventoryView() {
   const lowStock = trpc.inventory.lowStock.useQuery(undefined, { retry: false });
   return <div className="space-y-5"><div className="grid gap-4 sm:grid-cols-3"><StatCard label="حركات اليوم" value="—" note="تظهر بعد أول عملية" tone="blue" icon={<Activity size={18} />} /><StatCard label="منتجات منخفضة" value={integer(lowStock.data?.length)} note={lowStock.data?.length ? "تحتاج إجراء" : "مستقر"} tone={lowStock.data?.length ? "red" : "mint"} icon={<CircleAlert size={18} />} /><StatCard label="قيمة المخزون" value="—" note="قريبًا" tone="yellow" icon={<Boxes size={18} />} /></div><section className="soft-shadow overflow-hidden rounded-2xl border border-[#e0e9e6] bg-white"><div className="border-b border-[#e8efed] px-5 py-4"><h3 className="font-extrabold text-[#29464e]">تنبيهات المخزون</h3><p className="mt-1 text-[11px] text-[#8a9c9c]">المنتجات التي وصلت إلى الحد الأدنى أو أقل</p></div>{lowStock.isLoading ? <div className="p-10 text-center text-xs text-[#829394]">جارٍ فحص المخزون...</div> : lowStock.data?.length ? <div className="overflow-x-auto"><table className="w-full text-right"><thead className="bg-[#f8fbfa] text-[10px] font-extrabold text-[#88999a]"><tr><th className="px-5 py-3">المنتج</th><th className="px-5 py-3">المتاح</th><th className="px-5 py-3">الحد الأدنى</th><th className="px-5 py-3">الإجراء</th></tr></thead><tbody>{lowStock.data.map(product => <tr key={product.id} className="border-t border-[#eef3f1] text-xs"><td className="px-5 py-4 font-extrabold text-[#34515a]">{product.name}</td><td className="px-5 py-4 font-extrabold text-[#b4484b]">{integer(product.stockQuantity)} {product.unit}</td><td className="px-5 py-4 text-[#76888a]">{integer(product.minimumStock)} {product.unit}</td><td className="px-5 py-4"><span className="rounded-lg bg-[#fff3cf] px-2 py-1 text-[10px] font-bold text-[#9b7000]">اطلب توريدًا</span></td></tr>)}</tbody></table></div> : <EmptyState icon={<Check size={20} />} title="المخزون مستقر" body="لا توجد منتجات تحت الحد الأدنى حاليًا. ستظهر التنبيهات هنا تلقائيًا." />}</section></div>;
+}
+
+function ReportsView() {
+  const invoices = trpc.invoices.list.useQuery({ search: "" }, { retry: false });
+  const rows = invoices.data ?? [];
+  const sales = rows.reduce((sum, row) => sum + Number(row.total || 0), 0);
+  const cash = rows.filter(row => row.paymentMethod === "CASH").reduce((sum, row) => sum + Number(row.total || 0), 0);
+  return <div className="space-y-5"><div className="grid gap-4 sm:grid-cols-3"><StatCard label="إجمالي المبيعات" value={money(sales)} note="كل الفواتير المحفوظة" tone="mint" icon={<BarChart3 size={18} />} /><StatCard label="عدد الفواتير" value={integer(rows.length)} note="الفواتير الحالية" tone="blue" icon={<Receipt size={18} />} /><StatCard label="المبيعات النقدية" value={money(cash)} note="حسب طريقة الدفع" tone="yellow" icon={<CreditCard size={18} />} /></div><section className="soft-shadow overflow-hidden rounded-2xl border border-[#e0e9e6] bg-white"><div className="border-b border-[#e8efed] px-5 py-4"><h3 className="font-extrabold text-[#29464e]">تقرير المبيعات</h3><p className="mt-1 text-[11px] text-[#8a9c9c]">ملخص قابل للمراجعة لكل عمليات البيع</p></div>{invoices.isLoading ? <div className="p-10 text-center text-xs text-[#829394]">جارٍ تحميل التقرير...</div> : <div className="overflow-x-auto"><table className="w-full text-right"><thead className="bg-[#f8fbfa] text-[10px] font-extrabold text-[#88999a]"><tr><th className="px-5 py-3">الفاتورة</th><th className="px-5 py-3">التاريخ</th><th className="px-5 py-3">الدفع</th><th className="px-5 py-3">الإجمالي</th></tr></thead><tbody>{rows.slice(0, 100).map(row => <tr key={row.id} className="border-t border-[#eef3f1] text-xs"><td className="mono px-5 py-3 font-bold text-[#36535a]">{row.invoiceNumber}</td><td className="px-5 py-3 text-[#76888a]">{new Date(row.createdAt).toLocaleString("ar-EG")}</td><td className="px-5 py-3 text-[#76888a]">{row.paymentMethod === "CASH" ? "نقدي" : row.paymentMethod}</td><td className="px-5 py-3 font-extrabold text-[#29464e]">{money(row.total)}</td></tr>)}</tbody></table></div>}</section></div>;
 }
 
 function UsersView() {
@@ -447,6 +461,6 @@ export default function Home() {
   if (!isAuthenticated) return <PublicWelcome loading={loading} signIn={signIn} signUp={signUp} firebaseConfigured={firebaseConfigured} sessionIssue={sessionIssue} />;
   const title = section === "/pos" ? "نقطة البيع" : section === "/dashboard" ? "نظرة عامة" : section === "/products" ? "المنتجات" : section === "/inventory" ? "المخزون" : section === "/invoices" ? "الفواتير" : section === "/reports" ? "التقارير" : section === "/users" ? "المستخدمون" : section === "/branches" ? "الفروع" : section === "/subscriptions" ? "الاشتراك" : section === "/settings" ? "إعدادات المتجر" : section === "/super-admin" ? "الإدارة العليا" : current?.label || "المتجر";
   const subtitle = section === "/pos" ? "امسح، أضف، احفظ — بدون توقف" : section === "/dashboard" ? "ملخص أداء المتجر وحركة التشغيل" : "إدارة بيانات المتجر بصلاحيات واضحة";
-  const view = section === "/pos" ? <PosView role={role} userId={user?.id || 0} /> : section === "/dashboard" ? <DashboardView metrics={metrics.data || bootstrap.data?.metrics} /> : section === "/products" ? <ProductsView /> : section === "/invoices" ? <InvoicesView /> : section === "/inventory" ? <InventoryView /> : section === "/users" ? <UsersView /> : section === "/settings" ? <SettingsView /> : section === "/super-admin" && role === "SUPER_ADMIN" ? <SuperAdminView /> : <DashboardView metrics={metrics.data || bootstrap.data?.metrics} />;
+  const view = section === "/pos" ? <PosView role={role} userId={user?.id || 0} /> : section === "/dashboard" ? <DashboardView metrics={metrics.data || bootstrap.data?.metrics} /> : section === "/products" ? <ProductsView /> : section === "/invoices" ? <InvoicesView /> : section === "/reports" ? <ReportsView /> : section === "/inventory" ? <InventoryView /> : section === "/users" ? <UsersView /> : section === "/settings" ? <SettingsView /> : section === "/super-admin" && role === "SUPER_ADMIN" ? <SuperAdminView /> : <DashboardView metrics={metrics.data || bootstrap.data?.metrics} />;
   return <div className="flex min-h-screen bg-[#f2f6f4]" dir="rtl"><Sidebar path={section} navigate={navigate} role={role} onLogout={() => void logout()} /><main className="min-w-0 flex-1"><Header title={title} subtitle={subtitle} navigate={navigate} onLogout={() => void logout()} /><div className="container pb-24 pt-5 sm:py-7">{metrics.isError && section !== "/pos" ? <div className="mb-4 rounded-xl border border-[#f1d7b3] bg-[#fff8e9] px-4 py-3 text-xs font-semibold text-[#8b6500]">تعذر تحميل بعض الإحصاءات الآن، لكن يمكنك متابعة العمل من نقطة البيع.</div> : null}{view}</div></main><MobileBottomNav path={section} navigate={navigate} /></div>;
 }

@@ -121,10 +121,14 @@ export async function getTenantSubscription(supermarketId: number) {
 }
 
 export async function createProduct(supermarketId: number, input: AnyRecord, userId: number, branchId: number | null) {
-  const duplicate = await findProductByBarcode(supermarketId, input.barcode);
+  const barcode = String(input.barcode || "").trim();
+  const name = String(input.name || "").trim();
+  const sellingPrice = Number(input.sellingPrice);
+  if (barcode.length < 3 || name.length < 2 || !Number.isFinite(sellingPrice)) throw new Error("INVALID_PRODUCT_DATA");
+  const duplicate = await findProductByBarcode(supermarketId, barcode);
   if (duplicate) throw new Error("DUPLICATE_BARCODE");
   const id = await nextId("products"); const timestamp = nowIso();
-  const product = { id, supermarketId, branchId: input.branchId ?? branchId, categoryId: input.categoryId ?? null, name: input.name, barcode: input.barcode, sku: input.sku ?? null, brand: input.brand ?? null, unit: input.unit || "قطعة", sellingPrice: Number(input.sellingPrice), costPrice: Number(input.costPrice || 0), stockQuantity: Number(input.stockQuantity || 0), minimumStock: Number(input.minimumStock || 5), description: input.description ?? null, isActive: true, createdAt: timestamp, updatedAt: timestamp };
+  const product = { id, supermarketId, branchId: input.branchId ?? branchId, categoryId: input.categoryId ?? null, name, barcode, sku: input.sku ?? null, brand: input.brand ?? null, unit: input.unit || "قطعة", sellingPrice, costPrice: Number(input.costPrice || 0), stockQuantity: Number(input.stockQuantity || 0), minimumStock: Number(input.minimumStock || 5), description: input.description ?? null, isActive: true, createdAt: timestamp, updatedAt: timestamp };
   const auditId = await nextId("auditLogs");
   await firebaseRealtimeDb().ref().update({ [tablePath("products", id)]: product, [tablePath("auditLogs", auditId)]: { id: auditId, supermarketId, userId, action: "product.create", entity: "product", entityId: String(id), metadata: { barcode: input.barcode }, createdAt: timestamp } });
   return { id, success: true };
@@ -133,9 +137,13 @@ export async function createProduct(supermarketId: number, input: AnyRecord, use
 export async function updateProduct(supermarketId: number, input: AnyRecord, userId: number, branchId: number | null) {
   const existing = await read<AnyRecord>(tablePath("products", input.id));
   if (!existing || Number(existing.supermarketId) !== supermarketId) throw new Error("NOT_FOUND");
-  const duplicate = await findProductByBarcode(supermarketId, input.barcode);
+  const barcode = String(input.barcode || "").trim();
+  const name = String(input.name || "").trim();
+  const sellingPrice = Number(input.sellingPrice);
+  if (barcode.length < 3 || name.length < 2 || !Number.isFinite(sellingPrice)) throw new Error("INVALID_PRODUCT_DATA");
+  const duplicate = await findProductByBarcode(supermarketId, barcode);
   if (duplicate && Number(duplicate.id) !== Number(input.id)) throw new Error("DUPLICATE_BARCODE");
-  const product = { ...existing, ...input, branchId: input.branchId ?? branchId, categoryId: input.categoryId ?? null, costPrice: Number(input.costPrice || 0), sellingPrice: Number(input.sellingPrice), stockQuantity: Number(input.stockQuantity || 0), minimumStock: Number(input.minimumStock || 5), updatedAt: nowIso() };
+  const product = { ...existing, ...input, name, barcode, branchId: input.branchId ?? branchId, categoryId: input.categoryId ?? null, costPrice: Number(input.costPrice || 0), sellingPrice, stockQuantity: Number(input.stockQuantity || 0), minimumStock: Number(input.minimumStock || 5), updatedAt: nowIso() };
   const auditId = await nextId("auditLogs");
   await firebaseRealtimeDb().ref().update({ [tablePath("products", input.id)]: product, [tablePath("auditLogs", auditId)]: { id: auditId, supermarketId, userId, action: "product.update", entity: "product", entityId: String(input.id), metadata: { barcode: input.barcode }, createdAt: nowIso() } });
   return { success: true, id: input.id };

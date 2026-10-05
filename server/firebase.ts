@@ -24,6 +24,14 @@ function endpoint(path: string) {
   return `${databaseUrl()}/${normalized}.json?auth=${encodeURIComponent(token())}`;
 }
 
+async function assertOk(response: Response, operation: string) {
+  if (response.ok) return;
+  const body = await response.text().catch(() => "");
+  let detail = body;
+  try { detail = String((JSON.parse(body) as { error?: string }).error || body); } catch { /* keep raw response */ }
+  throw new Error(`FIREBASE_${operation}_FAILED:${response.status}:${detail.slice(0, 240)}`);
+}
+
 export type FirebaseRealtimeReference = {
   get(): Promise<{ exists(): boolean; val(): unknown }>;
   transaction(update: (current: unknown) => unknown): Promise<{ snapshot: { val(): unknown } }>;
@@ -37,17 +45,17 @@ function reference(path = ""): FirebaseRealtimeReference {
   return {
     async get() {
       const response = await fetch(endpoint(path));
-      if (!response.ok) throw new Error(`Firebase REST read failed: ${response.status}`);
+      await assertOk(response, "READ");
       const value = await response.json();
       return { exists: () => value !== null, val: () => value };
     },
     async set(value) {
       const response = await fetch(endpoint(path), { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(value) });
-      if (!response.ok) throw new Error(`Firebase REST write failed: ${response.status}`);
+      await assertOk(response, "WRITE");
     },
     async update(values) {
       const response = await fetch(endpoint(path), { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(values) });
-      if (!response.ok) throw new Error(`Firebase REST update failed: ${response.status}`);
+      await assertOk(response, "UPDATE");
     },
     async transaction(update) {
       const current = await this.get();

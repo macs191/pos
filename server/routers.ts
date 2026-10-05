@@ -47,6 +47,11 @@ function requireRole(role: string, allowed: Set<string>) {
 }
 function mapError(error: unknown): never {
   const message = String(error);
+  if (message.includes("FIREBASE_UPDATE_FAILED:401") || message.includes("FIREBASE_WRITE_FAILED:401")) throw new TRPCError({ code: "UNAUTHORIZED", message: "انتهت جلسة Firebase. سجّل الخروج ثم ادخل مرة أخرى." });
+  if (message.includes("FIREBASE_UPDATE_FAILED:403") || message.includes("FIREBASE_WRITE_FAILED:403")) throw new TRPCError({ code: "FORBIDDEN", message: "قواعد Realtime Database تمنع حفظ البيانات. اسمح بالكتابة للمستخدم المسجل ثم اضغط Publish." });
+  if (message.includes("FIREBASE_READ_FAILED:401") || message.includes("FIREBASE_READ_FAILED:403")) throw new TRPCError({ code: "FORBIDDEN", message: "لا يمكن قراءة قاعدة البيانات. تحقق من تسجيل الدخول وقواعد Realtime Database." });
+  if (message.includes("FIREBASE_") || message.includes("Firebase")) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `تعذر الحفظ في Firebase: ${message.slice(0, 180)}` });
+  if (message.includes("INVALID_PRODUCT_DATA")) throw new TRPCError({ code: "BAD_REQUEST", message: "بيانات المنتج غير صحيحة. أدخل اسمًا، باركودًا من 3 أرقام على الأقل، وسعرًا صالحًا." });
   if (message.includes("DUPLICATE_BARCODE")) throw new TRPCError({ code: "CONFLICT", message: "هذا الباركود محفوظ بالفعل." });
   if (message.includes("NOT_FOUND") || message.includes("PRODUCT_NOT_FOUND")) throw new TRPCError({ code: "NOT_FOUND", message: "العنصر غير موجود." });
   if (message.includes("INSUFFICIENT_STOCK")) throw new TRPCError({ code: "BAD_REQUEST", message: `المخزون غير كافٍ للمنتج: ${message.split(":")[1] || ""}` });
