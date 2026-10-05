@@ -1,71 +1,86 @@
-import { AsyncLocalStorage } from "node:async_hooks";
+import { applicationDefault, cert, getApps, initializeApp, type App } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
+import { getDatabase, type Database, type Reference } from "firebase-admin/database";
 import { ENV } from "./_core/env.js";
 
-const tokenStorage = new AsyncLocalStorage<string>();
+let firebaseApp: App | null = null;
 
-export function runWithFirebaseToken<T>(token: string, callback: () => T): T {
-  return tokenStorage.run(token, callback);
-}
+function getAdminApp(): App {
+  if (firebaseApp) return firebaseApp;
+  const existing = getApps()[0];
+  if (existing) {
+    firebaseApp = existing;
+    return existing;
+  }
 
-function databaseUrl() {
-  const url = process.env.VITE_FIREBASE_DATABASE_URL || process.env.FIREBASE_DATABASE_URL || ENV.firebaseDatabaseUrl;
-  if (!url) throw new Error("Firebase Realtime Database URL is not configured.");
-  return url.replace(/\/$/, "");
-}
+  const databaseURL = process.env.FIREBASE_DATABASE_URL || process.env.VITE_FIREBASE_DATABASE_URL || ENV.firebaseDatabaseUrl;
+  const projectId = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || ENV.firebaseProjectId;
+  if (!databaseURL || !projectId) {
+    throw new Error("Firebase Admin is not configured. Set FIREBASE_DATABASE_URL and FIREBASE_PROJECT_ID.");
+  }
 
-function token() {
-  const value = tokenStorage.getStore();
-  if (!value) throw new Error("Firebase ID token is missing.");
-  return value;
-}
+  let credential;
+  const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  if (serviceAccountJson) {
+    let serviceAccount: { project_id?: string; projectId?: string; client_email?: string; clientEmail?: string; private_key?: string; privateKey?: string };
+    try {
+      serviceAccount = JSON.parse(serviceAccountJson) as typeof serviceAccount;
+    } catch {
+      throw new Error("FIREBASE_SERVICE_ACCOUNT_JSON must contain valid service-account JSON.");
+    }
+    const clientEmail = serviceAccount.client_email || serviceAccount.clientEmail;
+    const privateKey = (serviceAccount.private_key || serviceAccount.privateKey || "").replace(/\\n/g, "\n");
+    if (!clientEmail || !privateKey.includes("PRIVATE KEY")) {
+      throw new Error("FIREBASE_SERVICE_ACCOUNT_JSON is missing client_email or private_key.");
+    }
+    credential = cert({
+      projectId: serviceAccount.project_id || serviceAccount.projectId || projectId,
+      clientEmail,
+      privateKey,
+    });
+  } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.K_SERVICE || process.env.FUNCTIONS_EMULATOR) {
+    credential = applicationDefault();
+  } else {
+    throw new Error("Set FIREBASE_SERVICE_ACCOUNT_JSON or configure Google Application Default Credentials for Firebase Admin.");
+  }
 
-function endpoint(path: string) {
-  const normalized = path.replace(/^\/+/, "");
-  return `${databaseUrl()}/${normalized}.json?auth=${encodeURIComponent(token())}`;
-}
-
-async function assertOk(response: Response, operation: string) {
-  if (response.ok) return;
-  const body = await response.text().catch(() => "");
-  let detail = body;
-  try { detail = String((JSON.parse(body) as { error?: string }).error || body); } catch { /* keep raw response */ }
-  throw new Error(`FIREBASE_${operation}_FAILED:${response.status}:${detail.slice(0, 240)}`);
+  firebaseApp = initializeApp({ credential, databaseURL, projectId }, "souqi-server");
+  return firebaseApp;
 }
 
 export type FirebaseRealtimeReference = {
   get(): Promise<{ exists(): boolean; val(): unknown }>;
-  transaction(update: (current: unknown) => unknown): Promise<{ snapshot: { val(): unknown } }>;
+  transaction(update: (current: unknown) => unknown): Promise<{ committed: boolean; snapshot: { val(): unknown } }>;
   set(value: unknown): Promise<void>;
   update(values: Record<string, unknown>): Promise<void>;
 };
 
 export type FirebaseRealtimeDatabase = { ref(path?: string): FirebaseRealtimeReference };
 
-function reference(path = ""): FirebaseRealtimeReference {
+function wrapReference(reference: Reference): FirebaseRealtimeReference {
   return {
     async get() {
-      const response = await fetch(endpoint(path));
-      await assertOk(response, "READ");
-      const value = await response.json();
-      return { exists: () => value !== null, val: () => value };
+      const snapshot = await reference.get();
+      return { exists: () => snapshot.exists(), val: () => snapshot.val() };
     },
     async set(value) {
-      const response = await fetch(endpoint(path), { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(value) });
-      await assertOk(response, "WRITE");
+      await reference.set(value);
     },
     async update(values) {
-      const response = await fetch(endpoint(path), { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(values) });
-      await assertOk(response, "UPDATE");
+      await reference.update(values);
     },
     async transaction(update) {
-      const current = await this.get();
-      const next = update(current.val());
-      await this.set(next);
-      return { snapshot: { val: () => next } };
+      const result = await reference.transaction(current => update(current), undefined, false);
+      return { committed: result.committed, snapshot: { val: () => result.snapshot.val() } };
     },
   };
 }
 
 export function firebaseRealtimeDb(): FirebaseRealtimeDatabase {
-  return { ref: (path?: string) => reference(path) };
+  const database: Database = getDatabase(getAdminApp());
+  return { ref: (path = "") => wrapReference(database.ref(path)) };
+}
+
+export async function verifyFirebaseIdToken(token: string) {
+  return getAuth(getAdminApp()).verifyIdToken(token, true);
 }

@@ -1,8 +1,11 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-describe("Firebase Web configuration", () => {
-  it("uses a UID-keyed profile model without requiring Admin credentials", () => {
-    expect("profiles/$uid").toContain("$uid");
-    expect(true).toBe(true);
+describe("Firebase Realtime Database access policy", () => {
+  it("denies all direct client reads and writes; server access uses Firebase Admin", () => {
+    const rulesPath = new URL("../database.rules.json", import.meta.url);
+    const rules = JSON.parse(readFileSync(rulesPath, "utf8")) as { rules: { ".read": boolean; ".write": boolean } };
+    expect(rules.rules[".read"]).toBe(false);
+    expect(rules.rules[".write"]).toBe(false);
   });
 });
