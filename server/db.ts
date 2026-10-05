@@ -59,6 +59,25 @@ export async function getDb() {
 export async function upsertUser(input: Partial<User> & { openId: string; name?: string | null; email?: string | null; loginMethod?: string | null }) {
   const existing = await getUserByOpenId(input.openId);
   if (existing) {
+    if (!existing.supermarketId) {
+      const supermarketId = await nextId("supermarkets");
+      const branchId = await nextId("branches");
+      const planId = await nextId("subscriptionPlans");
+      const subscriptionId = await nextId("subscriptions");
+      const timestamp = nowIso();
+      const name = input.name || existing.name || "متجري";
+      const tenant = { id: supermarketId, name, slug: tenantSlug(name, input.openId), phone: null, address: null, status: "ACTIVE", createdAt: timestamp, updatedAt: timestamp };
+      const branch = { id: branchId, supermarketId, name: "الفرع الرئيسي", address: null, phone: null, status: "ACTIVE", createdAt: timestamp };
+      const plan = { id: planId, name: "مجاني", code: `FREE-${supermarketId}`, price: 0, durationDays: 15, maxProducts: 250, maxUsers: 3, maxBranches: 1, maxInvoices: null, features: ["pos", "products", "invoices"], isActive: true, createdAt: timestamp, updatedAt: timestamp };
+      const subscription = { id: subscriptionId, supermarketId, planId, status: "ACTIVE", startDate: timestamp, endDate: new Date(Date.now() + TRIAL_DAYS * 86400000).toISOString(), createdAt: timestamp, updatedAt: timestamp };
+      const repaired = { ...existing, name: input.name ?? existing.name, email: input.email ?? existing.email, supermarketId, branchId, updatedAt: timestamp, lastSignedIn: timestamp };
+      const writes: Record<string, unknown> = {};
+      for (const [table, record] of [["supermarkets", tenant], ["branches", branch], ["subscriptionPlans", plan], ["subscriptions", subscription], ["users", { ...repaired, createdAt: asDate(existing.createdAt).toISOString() }]] as const) writes[tablePath(table, record.id)] = record;
+      writes[`usersByOpenId/${encodeKey(input.openId)}`] = repaired.id;
+      await firebaseRealtimeDb().ref().update(writes);
+      await writeRecord("profiles", { id: input.openId, uid: input.openId, email: repaired.email, name: repaired.name, supermarketId, subscriptionId, createdAt: asDate(existing.createdAt).toISOString(), updatedAt: timestamp });
+      return userDates(repaired);
+    }
     const updated = { ...existing, name: input.name ?? existing.name, email: input.email ?? existing.email, loginMethod: input.loginMethod ?? existing.loginMethod, lastSignedIn: nowIso(), updatedAt: nowIso() };
     await writeRecord("users", { ...updated, createdAt: existing.createdAt.toISOString(), lastSignedIn: updated.lastSignedIn, updatedAt: updated.updatedAt });
     await writeRecord("profiles", { id: input.openId, uid: input.openId, email: updated.email, name: updated.name, supermarketId: updated.supermarketId, subscriptionId: null, updatedAt: updated.updatedAt });
@@ -192,6 +211,20 @@ export async function listAllProducts() { return (await readTable<AnyRecord>("pr
 export async function listAllCategories() { return (await readTable<AnyRecord>("categories")).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0, 1000); }
 export async function listAllInvoices() { return (await readTable<AnyRecord>("invoices")).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0, 1000); }
 export async function listPlans() { return (await readTable<AnyRecord>("subscriptionPlans")).filter(row => row.isActive !== false).sort((a, b) => Number(a.price || 0) - Number(b.price || 0)); }
+export async function upsertPlan(input: { id?: number; name: string; code: string; price: number; durationDays: number; maxProducts: number; maxUsers: number; maxBranches: number }) {
+  const timestamp = nowIso();
+  if (input.id) {
+    const current = await read<AnyRecord>(tablePath("subscriptionPlans", input.id));
+    if (!current) throw new Error("NOT_FOUND");
+    const updated = { ...current, ...input, updatedAt: timestamp };
+    await writeRecord("subscriptionPlans", updated);
+    return updated;
+  }
+  const id = await nextId("subscriptionPlans");
+  const plan = { ...input, id, features: ["pos", "products", "invoices"], isActive: true, createdAt: timestamp, updatedAt: timestamp };
+  await writeRecord("subscriptionPlans", plan);
+  return plan;
+}
 export async function listAccounts() { const stores = await readTable<AnyRecord>("supermarkets"); return Promise.all(stores.map(async store => ({ store, access: await getTenantSubscription(Number(store.id)) }))); }
 export async function globalMetrics() { const stores = await readTable<AnyRecord>("supermarkets"); const users = await readTable<AnyRecord>("users"); const products = await readTable<AnyRecord>("products"); const invoices = await readTable<AnyRecord>("invoices"); return { supermarkets: stores.length, users: users.length, products: products.length, invoices: invoices.length, sales: invoices.reduce((sum, row) => sum + Number(row.total || 0), 0) }; }
 export async function setUserRole(id: number, role: string) { const user = await read<AnyRecord>(tablePath("users", id)); if (!user) throw new Error("NOT_FOUND"); await firebaseRealtimeDb().ref(tablePath("users", id)).set({ ...user, role, updatedAt: nowIso() }); return { id, role }; }

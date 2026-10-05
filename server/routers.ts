@@ -28,6 +28,7 @@ import {
   setInvoiceStatus,
   setProductActive,
   setSubscription,
+  upsertPlan,
   setUserActive,
   setUserRole,
   updateProduct,
@@ -38,8 +39,8 @@ const catalogRoles = new Set(["OWNER", "ADMIN", "SUPER_ADMIN"]);
 const managerRoles = new Set(["OWNER", "ADMIN", "MANAGER", "SUPER_ADMIN"]);
 const cashierRoles = new Set(["OWNER", "ADMIN", "MANAGER", "CASHIER", "SUPER_ADMIN"]);
 
-function tenantId(user: { supermarketId: number | null }) {
-  if (!user.supermarketId) throw new TRPCError({ code: "FORBIDDEN", message: "لم يتم ربط حسابك بمتجر بعد." });
+function tenantId(user: { supermarketId: number | null } | null | undefined) {
+  if (!user?.supermarketId) throw new TRPCError({ code: "FORBIDDEN", message: "لم يتم ربط حسابك بمتجر بعد. سجّل الخروج ثم ادخل مرة أخرى لإنشاء ملف المتجر." });
   return user.supermarketId;
 }
 function requireRole(role: string, allowed: Set<string>) {
@@ -153,6 +154,7 @@ export const appRouter = router({
   superAdmin: router({
     overview: protectedProcedure.query(async ({ ctx }) => { requireRole(ctx.user.role, new Set(["SUPER_ADMIN"])); return globalMetrics(); }),
     plans: protectedProcedure.query(async ({ ctx }) => { requireRole(ctx.user.role, new Set(["SUPER_ADMIN"])); return listPlans(); }),
+    savePlan: protectedProcedure.input(z.object({ id: z.number().int().positive().optional(), name: z.string().trim().min(2).max(100), code: z.string().trim().min(2).max(40), price: z.number().nonnegative(), durationDays: z.number().int().positive(), maxProducts: z.number().int().positive(), maxUsers: z.number().int().positive(), maxBranches: z.number().int().positive() })).mutation(async ({ ctx, input }) => { requireRole(ctx.user.role, new Set(["SUPER_ADMIN"])); try { return await upsertPlan(input); } catch (error) { return mapError(error); } }),
     accounts: protectedProcedure.query(async ({ ctx }) => { requireRole(ctx.user.role, new Set(["SUPER_ADMIN"])); return listAccounts(); }),
     users: protectedProcedure.query(async ({ ctx }) => { requireRole(ctx.user.role, new Set(["SUPER_ADMIN"])); return listUsers(); }),
     setUserRole: protectedProcedure.input(z.object({ userId: z.number().int().positive(), role: z.enum(["OWNER", "ADMIN", "MANAGER", "CASHIER", "SUPER_ADMIN"]) })).mutation(async ({ ctx, input }) => { requireRole(ctx.user.role, new Set(["SUPER_ADMIN"])); try { return await setUserRole(input.userId, input.role); } catch (error) { return mapError(error); } }),
