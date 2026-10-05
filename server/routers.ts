@@ -23,6 +23,7 @@ import {
   listPriceChangeRequests,
   listInvoices,
   listUsers,
+  migrateTenantProductsToCatalog,
   setInvoiceStatus,
   setProductActive,
   setSubscription,
@@ -50,10 +51,10 @@ function requireRole(role: string, allowed: Set<string>) {
 function mapError(error: unknown): never {
   const message = String(error);
   if (message.includes("FIREBASE_UPDATE_FAILED:401") || message.includes("FIREBASE_WRITE_FAILED:401")) throw new TRPCError({ code: "UNAUTHORIZED", message: "انتهت جلسة Firebase. سجّل الخروج ثم ادخل مرة أخرى." });
-  if (message.includes("FIREBASE_UPDATE_FAILED:403") || message.includes("FIREBASE_WRITE_FAILED:403") || message.includes("FIREBASE_READ_FAILED:403")) throw new TRPCError({ code: "FORBIDDEN", message: "حساب Firebase Admin لا يملك صلاحية الوصول إلى Realtime Database؛ تحقق من حساب الخدمة ورابط قاعدة البيانات." });
+  if (message.includes("FIREBASE_UPDATE_FAILED:403") || message.includes("FIREBASE_WRITE_FAILED:403") || message.includes("FIREBASE_READ_FAILED:403")) throw new TRPCError({ code: "FORBIDDEN", message: "قواعد Realtime Database رفضت العملية. تحقق من نشر database.rules.json على قاعدة البيانات الصحيحة وأن الحساب مرتبط بالمتجر." });
   if (message.includes("FIREBASE_READ_FAILED:401")) throw new TRPCError({ code: "UNAUTHORIZED", message: "تعذر التحقق من جلسة Firebase؛ سجّل الدخول مرة أخرى." });
   if (message.includes("FIREBASE_") || message.includes("Firebase")) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `تعذر الحفظ في Firebase: ${message.slice(0, 180)}` });
-  if (message.includes("INVALID_PRODUCT_DATA")) throw new TRPCError({ code: "BAD_REQUEST", message: "بيانات المنتج غير صحيحة. أدخل اسمًا، باركودًا من 3 أرقام على الأقل، وسعرًا صالحًا." });
+  if (message.includes("INVALID_PRODUCT_DATA")) throw new TRPCError({ code: "BAD_REQUEST", message: "بيانات المنتج غير صحيحة. أدخل اسمًا، باركودًا رقميًا من 3 إلى 80 خانة، وسعرًا صالحًا." });
   if (message.includes("DUPLICATE_BARCODE")) throw new TRPCError({ code: "CONFLICT", message: "هذا الباركود محفوظ بالفعل." });
   if (message.includes("PRICE_UNCHANGED")) throw new TRPCError({ code: "BAD_REQUEST", message: "السعر المقترح مطابق للسعر الحالي." });
   if (message.includes("REQUEST_ALREADY_REVIEWED")) throw new TRPCError({ code: "CONFLICT", message: "تمت مراجعة هذا الطلب مسبقًا." });
@@ -80,17 +81,24 @@ export const appRouter = router({
   }),
   dashboard: router({ metrics: protectedProcedure.query(({ ctx }) => getDashboardMetrics(tenantId(ctx.user))) }),
   products: router({
-    list: protectedProcedure.input(z.object({ search: z.string().trim().max(100).default("") })).query(({ input }) => findCatalogProducts(input.search)),
-    lookupByBarcode: protectedProcedure.input(z.object({ barcode: z.string().trim().min(1).max(80) })).mutation(async ({ ctx, input }) => {
+    list: protectedProcedure.input(z.object({ search: z.string().trim().max(100).default("") })).query(async ({ ctx, input }) => {
+      await migrateTenantProductsToCatalog(ctx.user);
+      return findCatalogProducts(input.search);
+    }),
+    lookupByBarcode: protectedProcedure.input(z.object({ barcode: z.string().trim().regex(/^\d{3,80}$/) })).mutation(async ({ ctx, input }) => {
+      await migrateTenantProductsToCatalog(ctx.user);
       const product = await findCatalogProductByBarcode(input.barcode);
       if (!product) throw new TRPCError({ code: "NOT_FOUND", message: "المنتج غير موجود." });
       return product;
     }),
-    lookupByName: protectedProcedure.input(z.object({ name: z.string().trim().min(2).max(200) })).mutation(async ({ input }) => (await findCatalogProducts(input.name)).slice(0, 5)),
-    create: protectedProcedure.input(z.object({ name: z.string().trim().min(2).max(200), barcode: z.string().trim().min(3).max(80), sellingPrice: z.number().nonnegative() })).mutation(async ({ ctx, input }) => {
-      try { return await createCatalogProduct(input, ctx.user.id); } catch (error) { return mapError(error); }
+    lookupByName: protectedProcedure.input(z.object({ name: z.string().trim().min(2).max(200) })).mutation(async ({ ctx, input }) => {
+      await migrateTenantProductsToCatalog(ctx.user);
+      return (await findCatalogProducts(input.name)).slice(0, 5);
     }),
-    requestPriceChange: protectedProcedure.input(z.object({ barcode: z.string().trim().min(3).max(80), proposedPrice: z.number().nonnegative() })).mutation(async ({ ctx, input }) => {
+    create: protectedProcedure.input(z.object({ name: z.string().trim().min(2).max(200), barcode: z.string().trim().regex(/^\d{3,80}$/), sellingPrice: z.number().nonnegative() })).mutation(async ({ ctx, input }) => {
+      try { return await createCatalogProduct(input, ctx.user.id, ctx.user.openId); } catch (error) { return mapError(error); }
+    }),
+    requestPriceChange: protectedProcedure.input(z.object({ barcode: z.string().trim().regex(/^\d{3,80}$/), proposedPrice: z.number().nonnegative() })).mutation(async ({ ctx, input }) => {
       try { return await submitPriceChange(input, ctx.user); } catch (error) { return mapError(error); }
     }),
   }),
@@ -139,8 +147,8 @@ export const appRouter = router({
     users: protectedProcedure.query(async ({ ctx }) => { requireRole(ctx.user.role, new Set(["SUPER_ADMIN"])); return listUsers(); }),
     priceChangeRequests: protectedProcedure.input(z.object({ status: z.enum(["PENDING", "APPROVED", "REJECTED"]).default("PENDING") })).query(async ({ ctx, input }) => { requireRole(ctx.user.role, new Set(["SUPER_ADMIN"])); return listPriceChangeRequests(input.status); }),
     reviewPriceChange: protectedProcedure.input(z.object({ requestId: z.string().min(1), status: z.enum(["APPROVED", "REJECTED"]) })).mutation(async ({ ctx, input }) => { requireRole(ctx.user.role, new Set(["SUPER_ADMIN"])); try { return await reviewPriceChangeRequest(input.requestId, input.status, ctx.user.id); } catch (error) { return mapError(error); } }),
-    updateProduct: protectedProcedure.input(z.object({ id: z.string().min(1), name: z.string().trim().min(2).max(200), barcode: z.string().trim().min(3).max(80), sellingPrice: z.number().nonnegative() })).mutation(async ({ ctx, input }) => { requireRole(ctx.user.role, new Set(["SUPER_ADMIN"])); try { return await updateCatalogProduct(input, ctx.user.id); } catch (error) { return mapError(error); } }),
-    setUserRole: protectedProcedure.input(z.object({ userId: z.number().int().positive(), role: z.enum(["OWNER", "ADMIN", "MANAGER", "CASHIER", "SUPER_ADMIN"]) })).mutation(async ({ ctx, input }) => { requireRole(ctx.user.role, new Set(["SUPER_ADMIN"])); try { return await setUserRole(input.userId, input.role); } catch (error) { return mapError(error); } }),
+    updateProduct: protectedProcedure.input(z.object({ id: z.string().min(1), name: z.string().trim().min(2).max(200), barcode: z.string().trim().regex(/^\d{3,80}$/), sellingPrice: z.number().nonnegative() })).mutation(async ({ ctx, input }) => { requireRole(ctx.user.role, new Set(["SUPER_ADMIN"])); try { return await updateCatalogProduct(input, ctx.user.id); } catch (error) { return mapError(error); } }),
+    setUserRole: protectedProcedure.input(z.object({ userId: z.number().int().positive(), role: z.enum(["OWNER", "ADMIN", "MANAGER", "CASHIER"]) })).mutation(async ({ ctx, input }) => { requireRole(ctx.user.role, new Set(["SUPER_ADMIN"])); try { return await setUserRole(input.userId, input.role); } catch (error) { return mapError(error); } }),
     updateUserName: protectedProcedure.input(z.object({ userId: z.number().int().positive(), name: z.string().trim().min(2).max(120) })).mutation(async ({ ctx, input }) => { requireRole(ctx.user.role, new Set(["SUPER_ADMIN"])); try { return await updateUserDisplayName(input.userId, input.name); } catch (error) { return mapError(error); } }),
     setUserActive: protectedProcedure.input(z.object({ userId: z.number().int().positive(), isActive: z.boolean() })).mutation(async ({ ctx, input }) => { requireRole(ctx.user.role, new Set(["SUPER_ADMIN"])); try { return await setUserActive(input.userId, input.isActive); } catch (error) { return mapError(error); } }),
     setSubscription: protectedProcedure.input(z.object({ supermarketId: z.number().int().positive(), status: z.enum(["ACTIVE", "PAUSED", "CANCELED"]), endDate: z.coerce.date().nullable() })).mutation(async ({ ctx, input }) => { requireRole(ctx.user.role, new Set(["SUPER_ADMIN"])); try { return await setSubscription(input.supermarketId, input.status, input.endDate); } catch (error) { return mapError(error); } }),
