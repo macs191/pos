@@ -45,17 +45,20 @@ async function writeRecord(table: string, record: AnyRecord) {
   return record;
 }
 
-async function createRecordIfMissing(table: string, record: AnyRecord) {
+export async function createRecordIfMissing(table: string, record: AnyRecord) {
   const path = tablePath(table, record.id);
-  const current = await read<AnyRecord>(path);
-  if (current) return current;
   try {
+    // A missing record may be unreadable under tenant-scoped RTDB rules.
+    // Attempt a conditional create first, then read only after a conflict.
     await firebaseRealtimeDb().ref(path).create(record);
     return record;
   } catch (error) {
-    if (error instanceof Error && error.message.endsWith(":412")) {
-      const raced = await read<AnyRecord>(path);
-      if (raced) return raced;
+    if (!(error instanceof Error) || !/:(?:401|412)$/.test(error.message)) throw error;
+    try {
+      const current = await read<AnyRecord>(path);
+      if (current) return current;
+    } catch {
+      // Keep the original write error; a denied read must not weaken access rules.
     }
     throw error;
   }
@@ -153,21 +156,18 @@ export async function upsertUser(input: Partial<User> & { openId: string; name?:
     id: supermarketId, ownerUid: uid, name: storeName, slug: tenantSlug(storeName, uid),
     phone: null, address: null, status: "ACTIVE", createdAt: timestamp, updatedAt: timestamp,
   };
-  const previousTenant = await read<AnyRecord>(tablePath("supermarkets", supermarketId));
-  if (previousTenant && previousTenant.ownerUid !== uid) throw new Error("TENANT_ID_COLLISION");
-  if (!previousTenant) await createRecordIfMissing("supermarkets", tenant);
+  const savedTenant = await createRecordIfMissing("supermarkets", tenant);
+  if (savedTenant.ownerUid !== uid) throw new Error("TENANT_ID_COLLISION");
 
   const branch = { id: branchId, supermarketId, name: "الفرع الرئيسي", address: null, phone: null, status: "ACTIVE", createdAt: timestamp };
-  const previousBranch = await read<AnyRecord>(tablePath("branches", branchId));
-  if (!previousBranch) await createRecordIfMissing("branches", branch);
+  await createRecordIfMissing("branches", branch);
 
   const subscription = {
     id: supermarketId, supermarketId, planId: 0, status: "ACTIVE", paymentStatus: "UNPAID",
     startDate: timestamp, endDate: new Date(Date.now() + TRIAL_DAYS * 86400000).toISOString(),
     endAt: Date.now() + TRIAL_DAYS * 86400000, createdAt: timestamp, updatedAt: timestamp,
   };
-  const previousSubscription = await read<AnyRecord>(tablePath("subscriptions", supermarketId));
-  if (!previousSubscription) await createRecordIfMissing("subscriptions", subscription);
+  await createRecordIfMissing("subscriptions", subscription);
 
   const user = {
     ...(existing || {}),
