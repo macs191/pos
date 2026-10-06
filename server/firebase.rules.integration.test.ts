@@ -47,6 +47,7 @@ integrationDescribe("Firebase RTDB security rules integration", () => {
   it("allows scoped owner onboarding but denies a forged free subscription term", async () => {
     const db = environment.authenticatedContext("owner-a").database();
     const now = Date.now();
+    await assertFails(get(ref(db, "supermarkets/11")));
     await assertFails(get(ref(environment.unauthenticatedContext().database(), "catalogProducts")));
     await assertSucceeds(set(ref(db, "supermarkets/11"), {
       id: 11, ownerUid: "owner-a", name: "المتجر", slug: "store-a", status: "ACTIVE",
