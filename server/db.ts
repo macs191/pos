@@ -1,7 +1,12 @@
+import { randomUUID } from "node:crypto";
 import type { User } from "../drizzle/schema.js";
 import { firebaseRealtimeDb } from "./firebase.js";
 import { ENV } from "./_core/env.js";
 import { normalizeTableRows } from "./table-data.js";
+import {
+  applySubscriptionRenewal,
+  hasPendingSubscriptionRequest,
+} from "./subscription.logic.js";
 import {
   applyApprovedPriceChange,
   buildGlobalProductRecord,
@@ -819,6 +824,194 @@ export async function listAccounts() {
   );
 }
 
+export async function listSubscriptionRequests(supermarketId?: number) {
+  return (await readTable<AnyRecord>("subscriptionRequests"))
+    .filter(
+      request =>
+        supermarketId === undefined ||
+        Number(request.supermarketId) === supermarketId
+    )
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+    .slice(0, 500);
+}
+
+export async function getLatestSubscriptionRequest(supermarketId: number) {
+  return (await listSubscriptionRequests(supermarketId))[0] ?? null;
+}
+
+export async function requestSubscriptionRenewal(
+  supermarketId: number,
+  user: Pick<User, "id" | "name" | "email">,
+  note: string | null
+) {
+  const store = await getTenantById(supermarketId);
+  if (!store) throw new Error("NOT_FOUND");
+
+  const id = `sr_${randomUUID()}`;
+  const createdAt = nowIso();
+  const request: AnyRecord = {
+    id,
+    supermarketId,
+    storeName: store.name,
+    requestedByUserId: user.id,
+    requestedByName: user.name,
+    requestedByEmail: user.email,
+    note: note?.trim() || null,
+    status: "PENDING",
+    createdAt,
+    updatedAt: createdAt,
+  };
+
+  const result = await firebaseRealtimeDb()
+    .ref("subscriptionRequests")
+    .transaction(current => {
+      const rows = normalizeTableRows<AnyRecord>(current);
+      if (hasPendingSubscriptionRequest(rows, supermarketId)) return current;
+
+      const root =
+        current && typeof current === "object"
+          ? { ...(current as Record<string, unknown>) }
+          : {};
+      return { ...root, [id]: request };
+    });
+
+  const saved = result.snapshot.val();
+  if (
+    !saved ||
+    typeof saved !== "object" ||
+    !Object.prototype.hasOwnProperty.call(saved, id)
+  )
+    throw new Error("SUBSCRIPTION_REQUEST_PENDING");
+
+  return request;
+}
+
+export async function resolveSubscriptionRequest(
+  id: string,
+  decision: "APPROVED" | "REJECTED",
+  days: number,
+  adminUserId: number
+) {
+  const requestRef = firebaseRealtimeDb().ref(
+    tablePath("subscriptionRequests", id)
+  );
+  const processingToken = randomUUID();
+  const processingAt = nowIso();
+  const claim = await requestRef.transaction(current => {
+    if (!current || typeof current !== "object" || Array.isArray(current))
+      return current;
+    const request = current as AnyRecord;
+    if (request.status !== "PENDING") return request;
+    return {
+      ...request,
+      status: "PROCESSING",
+      processingByUserId: adminUserId,
+      processingToken,
+      processingAt,
+    };
+  });
+  const claimed = claim.snapshot.val() as AnyRecord | null;
+  if (!claimed || claimed.processingToken !== processingToken)
+    throw new Error("SUBSCRIPTION_REQUEST_ALREADY_RESOLVED");
+
+  const clearProcessingFields = (record: AnyRecord) => {
+    const clean = { ...record };
+    delete clean.processingByUserId;
+    delete clean.processingToken;
+    delete clean.processingAt;
+    return clean;
+  };
+
+  try {
+    const reviewedAt = nowIso();
+    const completedRequest = clearProcessingFields({
+      ...claimed,
+      status: decision,
+      reviewedAt,
+      reviewedByUserId: adminUserId,
+    });
+
+    if (decision === "REJECTED") {
+      const result = await requestRef.transaction(current => {
+        if (!current || typeof current !== "object" || Array.isArray(current))
+          return current;
+        return (current as AnyRecord).processingToken === processingToken
+          ? completedRequest
+          : current;
+      });
+      const saved = result.snapshot.val() as AnyRecord | null;
+      if (saved?.status !== decision || saved.reviewedByUserId !== adminUserId)
+        throw new Error("SUBSCRIPTION_REQUEST_ALREADY_RESOLVED");
+      return { id, status: decision };
+    }
+
+    const supermarketId = Number(claimed.supermarketId);
+    const subscriptions = (await readTable<AnyRecord>("subscriptions"))
+      .filter(row => Number(row.supermarketId) === supermarketId)
+      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    const current = subscriptions[0];
+    if (!current) throw new Error("SUBSCRIPTION_NOT_FOUND");
+
+    const fallbackEnd = new Date(
+      asDate(current.createdAt).getTime() + TRIAL_DAYS * 86400000
+    );
+    const subscriptionResult = await firebaseRealtimeDb()
+      .ref(tablePath("subscriptions", current.id))
+      .transaction(value => {
+        if (!value || typeof value !== "object" || Array.isArray(value))
+          return value;
+        const latest = value as AnyRecord;
+        if (Number(latest.supermarketId) !== supermarketId) return latest;
+        return applySubscriptionRenewal(
+          latest,
+          id,
+          days,
+          new Date(reviewedAt),
+          fallbackEnd
+        );
+      });
+    const updatedSubscription = subscriptionResult.snapshot.val() as
+      | AnyRecord
+      | null;
+    if (
+      !updatedSubscription ||
+      Number(updatedSubscription.supermarketId) !== supermarketId
+    )
+      throw new Error("SUBSCRIPTION_NOT_FOUND");
+    const endDate = asDate(updatedSubscription.endDate);
+    const approvedRequest = {
+      ...completedRequest,
+      grantedDays: days,
+    };
+    const finalized = await requestRef.transaction(value => {
+      if (!value || typeof value !== "object" || Array.isArray(value))
+        return value;
+      return (value as AnyRecord).processingToken === processingToken
+        ? approvedRequest
+        : value;
+    });
+    const savedRequest = finalized.snapshot.val() as AnyRecord | null;
+    if (
+      savedRequest?.status !== decision ||
+      savedRequest.reviewedByUserId !== adminUserId
+    )
+      throw new Error("SUBSCRIPTION_REQUEST_ALREADY_RESOLVED");
+
+    return { id, status: decision, endDate, isPaid: false, days };
+  } catch (error) {
+    await requestRef
+      .transaction(current => {
+        if (!current || typeof current !== "object" || Array.isArray(current))
+          return current;
+        const request = current as AnyRecord;
+        if (request.processingToken !== processingToken) return request;
+        return clearProcessingFields({ ...request, status: "PENDING" });
+      })
+      .catch(() => undefined);
+    throw error;
+  }
+}
+
 export async function globalMetrics() {
   const [stores, users, products, invoices, accounts, requests] =
     await Promise.all([
@@ -876,14 +1069,24 @@ export async function setSubscription(
     .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
   const current = rows[0];
   if (!current) throw new Error("NOT_FOUND");
-  const updated: AnyRecord = {
-    ...current,
-    status,
-    endDate: endDate?.toISOString() ?? null,
-    isPaid: isPaid ?? current.isPaid === true,
-    updatedAt: nowIso(),
-  };
-  await writeRecord("subscriptions", updated);
+  const result = await firebaseRealtimeDb()
+    .ref(tablePath("subscriptions", current.id))
+    .transaction(value => {
+      if (!value || typeof value !== "object" || Array.isArray(value))
+        return value;
+      const latest = value as AnyRecord;
+      if (Number(latest.supermarketId) !== supermarketId) return latest;
+      return {
+        ...latest,
+        status,
+        endDate: endDate?.toISOString() ?? null,
+        isPaid: isPaid ?? latest.isPaid === true,
+        updatedAt: nowIso(),
+      };
+    });
+  const updated = result.snapshot.val() as AnyRecord | null;
+  if (!updated || Number(updated.supermarketId) !== supermarketId)
+    throw new Error("NOT_FOUND");
   return {
     id: Number(updated.id),
     status: String(updated.status),

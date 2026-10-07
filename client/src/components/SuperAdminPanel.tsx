@@ -31,9 +31,14 @@ export function SuperAdminPanel() {
   const requests = trpc.superAdmin.priceChangeRequests.useQuery(undefined, {
     retry: false,
   });
+  const subscriptionRequests = trpc.superAdmin.subscriptionRequests.useQuery(
+    undefined,
+    { retry: false }
+  );
   const [editingBarcode, setEditingBarcode] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editPrice, setEditPrice] = useState("");
+  const [requestDays, setRequestDays] = useState(30);
 
   const refreshCatalog = () => {
     void products.refetch();
@@ -62,6 +67,20 @@ export function SuperAdminPanel() {
     },
     onError: error => toast.error(error.message),
   });
+  const resolveSubscriptionRequest =
+    trpc.superAdmin.resolveSubscriptionRequest.useMutation({
+      onSuccess: result => {
+        toast.success(
+          result.status === "APPROVED"
+            ? "تم تفعيل الاشتراك، وحالة الدفع غير مدفوعة حتى تأكيدها يدويًا"
+            : "تم رفض طلب الاشتراك"
+        );
+        void subscriptionRequests.refetch();
+        void accounts.refetch();
+        void overview.refetch();
+      },
+      onError: error => toast.error(error.message),
+    });
   const updateProduct = trpc.superAdmin.updateProduct.useMutation({
     onSuccess: () => {
       toast.success("تم تحديث المنتج العام");
@@ -507,7 +526,16 @@ export function SuperAdminPanel() {
                           setSubscription.mutate({
                             supermarketId: store.id,
                             status: "ACTIVE",
-                            endDate: new Date(Date.now() + 30 * 86400000),
+                            endDate: new Date(
+                              Math.max(
+                                Date.now(),
+                                access?.effectiveEnd
+                                  ? new Date(access.effectiveEnd).getTime()
+                                  : 0
+                              ) +
+                                30 * 86400000
+                            ),
+                            isPaid: false,
                           })
                         }
                         className="rounded-lg bg-[#e7f5f0] px-2 py-1.5 text-[10px] font-bold text-[#267a60]"
@@ -548,6 +576,130 @@ export function SuperAdminPanel() {
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section className="soft-shadow overflow-hidden rounded-2xl border border-[#e0e9e6] bg-white p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="font-extrabold text-[#29464e]">طلبات الاشتراك</h3>
+            <p className="mt-1 text-[11px] text-[#8a9c9c]">
+              الطلبات الواردة من المتاجر؛ الموافقة تفعّل المدة كغير مدفوعة،
+              ويمكن تسجيل الدفع يدويًا من جدول الاشتراكات.
+            </p>
+          </div>
+          <label className="text-[10px] font-bold text-[#718688]">
+            مدة التمديد بالأيام
+            <input
+              type="number"
+              min={1}
+              max={365}
+              value={requestDays}
+              onChange={event =>
+                setRequestDays(
+                  Math.max(1, Math.min(365, Number(event.target.value) || 1))
+                )
+              }
+              className="mt-1 block w-24 rounded-lg border border-[#dfe9e5] bg-white px-2 py-1.5 text-xs font-bold text-[#29464e]"
+            />
+          </label>
+        </div>
+        {subscriptionRequests.isLoading ? (
+          <div className="py-8 text-center text-xs text-[#829394]">
+            جارٍ تحميل طلبات الاشتراك...
+          </div>
+        ) : subscriptionRequests.data?.filter(Boolean).length ? (
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-right text-xs">
+              <thead className="bg-[#f8fbfa] text-[10px] font-extrabold text-[#88999a]">
+                <tr>
+                  <th className="px-3 py-3">المتجر</th>
+                  <th className="px-3 py-3">مقدم الطلب</th>
+                  <th className="px-3 py-3">تاريخ الطلب</th>
+                  <th className="px-3 py-3">ملاحظة</th>
+                  <th className="px-3 py-3">الحالة</th>
+                  <th className="px-3 py-3">الإجراء</th>
+                </tr>
+              </thead>
+              <tbody>
+                {subscriptionRequests.data?.filter(Boolean).map(request => (
+                  <tr key={request.id} className="border-t border-[#eef3f1]">
+                    <td className="px-3 py-3 font-extrabold text-[#34515a]">
+                      {request.storeName || `متجر #${request.supermarketId}`}
+                    </td>
+                    <td className="px-3 py-3">
+                      <div>{request.requestedByName || "مستخدم"}</div>
+                      <div className="text-[10px] text-[#899b9b]">
+                        {request.requestedByEmail || "—"}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 text-[#76888a]">
+                      {new Date(request.createdAt).toLocaleDateString("ar-EG")}
+                    </td>
+                    <td className="max-w-48 px-3 py-3 text-[#76888a]">
+                      {request.note || "—"}
+                    </td>
+                    <td className="px-3 py-3">
+                      {request.status === "PENDING"
+                        ? "قيد المراجعة"
+                        : request.status === "PROCESSING"
+                          ? "جارٍ المعالجة"
+                          : request.status === "APPROVED"
+                            ? "تمت الموافقة"
+                            : "مرفوض"}
+                    </td>
+                    <td className="px-3 py-3">
+                      {request.status === "PENDING" ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          <button
+                            type="button"
+                            disabled={resolveSubscriptionRequest.isPending}
+                            onClick={() =>
+                              resolveSubscriptionRequest.mutate({
+                                requestId: request.id,
+                                decision: "APPROVED",
+                                days: requestDays,
+                              })
+                            }
+                            className="rounded-lg bg-[#e7f5f0] px-2 py-1.5 text-[10px] font-bold text-[#267a60] disabled:opacity-50"
+                          >
+                            موافقة + {requestDays} يومًا
+                          </button>
+                          <button
+                            type="button"
+                            disabled={resolveSubscriptionRequest.isPending}
+                            onClick={() =>
+                              resolveSubscriptionRequest.mutate({
+                                requestId: request.id,
+                                decision: "REJECTED",
+                              })
+                            }
+                            className="rounded-lg border border-[#f0d8d8] px-2 py-1.5 text-[10px] font-bold text-[#a83d42] disabled:opacity-50"
+                          >
+                            رفض
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-[10px] text-[#899b9b]">
+                          {request.grantedDays
+                            ? `تمديد ${request.grantedDays} يومًا`
+                            : request.reviewedAt
+                              ? new Date(request.reviewedAt).toLocaleDateString(
+                                  "ar-EG"
+                                )
+                              : "—"}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="py-8 text-center text-xs text-[#829394]">
+            لا توجد طلبات اشتراك حتى الآن.
+          </div>
+        )}
       </section>
 
       <section className="soft-shadow overflow-hidden rounded-2xl border border-[#e0e9e6] bg-white p-5">

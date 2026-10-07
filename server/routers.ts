@@ -14,6 +14,7 @@ import {
   findProductsByName,
   getDashboardMetrics,
   getTenantBranches,
+  getLatestSubscriptionRequest,
   getTenantById,
   getTenantSubscription,
   globalMetrics,
@@ -24,14 +25,17 @@ import {
   listAllProducts,
   listPlans,
   listInvoices,
+  listSubscriptionRequests,
   listPriceChangeRequests,
   listUsers,
   resolvePriceChangeRequest,
+  resolveSubscriptionRequest,
   setInvoiceStatus,
   setProductActive,
   setSubscription,
   setUserActive,
   setUserRole,
+  requestSubscriptionRenewal,
   submitPriceChangeRequest,
   updateCatalogProduct,
   updateStore,
@@ -88,6 +92,21 @@ function mapError(error: unknown): never {
       code: "CONFLICT",
       message:
         "تغير السعر الحالي منذ إنشاء الطلب؛ راجع المنتج ثم أعد إرسال الطلب.",
+    });
+  if (message.includes("SUBSCRIPTION_REQUEST_PENDING"))
+    throw new TRPCError({
+      code: "CONFLICT",
+      message: "يوجد بالفعل طلب اشتراك قيد المراجعة لهذا المتجر.",
+    });
+  if (message.includes("SUBSCRIPTION_REQUEST_ALREADY_RESOLVED"))
+    throw new TRPCError({
+      code: "CONFLICT",
+      message: "تمت معالجة طلب الاشتراك مسبقًا.",
+    });
+  if (message.includes("SUBSCRIPTION_NOT_FOUND"))
+    throw new TRPCError({
+      code: "NOT_FOUND",
+      message: "لا يوجد سجل اشتراك لهذا المتجر؛ راجع إعدادات الإدارة.",
     });
   if (message.includes("REQUEST_ALREADY_RESOLVED"))
     throw new TRPCError({
@@ -252,6 +271,45 @@ export const appRouter = router({
       const id = getTenantIdFromUser(ctx.user);
       return id === null ? null : getTenantSubscription(id);
     }),
+    myRequest: publicProcedure.query(async ({ ctx }) => {
+      if (!ctx.user)
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "سجّل الدخول لعرض طلب الاشتراك.",
+        });
+      const request = await getLatestSubscriptionRequest(tenantId(ctx.user));
+      if (!request) return null;
+      return {
+        id: request.id,
+        status: request.status,
+        createdAt: request.createdAt,
+        reviewedAt: request.reviewedAt ?? null,
+        note: request.note ?? null,
+      };
+    }),
+    request: publicProcedure
+      .input(z.object({ note: z.string().trim().max(500).optional() }))
+      .mutation(async ({ ctx, input }) => {
+        if (!ctx.user)
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "سجّل الدخول أولًا لإرسال طلب الاشتراك.",
+          });
+        try {
+          const request = await requestSubscriptionRenewal(
+            tenantId(ctx.user),
+            ctx.user,
+            input.note ?? null
+          );
+          return {
+            id: request.id,
+            status: request.status,
+            createdAt: request.createdAt,
+          };
+        } catch (error) {
+          return mapError(error);
+        }
+      }),
     current: protectedProcedure.query(({ ctx }) => {
       requireRole(ctx.user.role, managerRoles);
       return getTenantSubscription(tenantId(ctx.user));
@@ -358,6 +416,31 @@ export const appRouter = router({
             input.status,
             input.endDate,
             input.isPaid
+          );
+        } catch (error) {
+          return mapError(error);
+        }
+      }),
+    subscriptionRequests: protectedProcedure.query(async ({ ctx }) => {
+      requireRole(ctx.user.role, superAdminRoles);
+      return listSubscriptionRequests();
+    }),
+    resolveSubscriptionRequest: protectedProcedure
+      .input(
+        z.object({
+          requestId: z.string().min(1).max(120),
+          decision: z.enum(["APPROVED", "REJECTED"]),
+          days: z.number().int().min(1).max(365).default(30),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        requireRole(ctx.user.role, superAdminRoles);
+        try {
+          return await resolveSubscriptionRequest(
+            input.requestId,
+            input.decision,
+            input.days,
+            ctx.user.id
           );
         } catch (error) {
           return mapError(error);

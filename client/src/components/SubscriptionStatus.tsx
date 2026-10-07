@@ -5,8 +5,11 @@ import {
   LogOut,
   MessageCircle,
   Phone,
+  Send,
   ShieldAlert,
 } from "lucide-react";
+import { useState, type FormEvent } from "react";
+import { toast } from "sonner";
 
 const contactPhone = "+201033148828";
 const whatsappLink = "https://wa.me/201033148828";
@@ -18,6 +21,99 @@ const dateLabel = (value: unknown) =>
         day: "numeric",
       })
     : "غير محدد";
+
+function SubscriptionRequestPanel() {
+  const [note, setNote] = useState("");
+  const latestRequest = trpc.subscription.myRequest.useQuery(undefined, {
+    retry: false,
+  });
+  const request = trpc.subscription.request.useMutation({
+    onSuccess: async () => {
+      toast.success("تم إرسال طلب الاشتراك إلى الإدارة");
+      setNote("");
+      await latestRequest.refetch();
+    },
+    onError: error => toast.error(error.message),
+  });
+  const status = latestRequest.data?.status;
+  const pending = status === "PENDING" || status === "PROCESSING";
+  const statusLabel =
+    status === "PENDING"
+      ? "طلبك قيد المراجعة"
+      : status === "PROCESSING"
+        ? "جارٍ معالجة الطلب"
+        : status === "APPROVED"
+          ? "تمت الموافقة على آخر طلب"
+          : status === "REJECTED"
+            ? "تم رفض آخر طلب"
+            : null;
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    request.mutate({ note: note.trim() || undefined });
+  };
+
+  return (
+    <form
+      onSubmit={submit}
+      className="rounded-2xl border border-[#dfe9e5] bg-[#f8fbfa] p-4"
+      dir="rtl"
+    >
+      <div className="flex items-start gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#e7f5f0] text-[#267a60]">
+          <CreditCard size={18} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h3 className="font-extrabold text-[#29464e]">طلب اشتراك أو تجديد</h3>
+          <p className="mt-1 text-[11px] leading-5 text-[#7e9092]">
+            أرسل الطلب ليظهر في لوحة الإدارة. التفعيل ومراجعة الدفع يدويان؛ لا
+            يتم تحصيل أي مبلغ من داخل التطبيق.
+          </p>
+        </div>
+      </div>
+      {statusLabel && (
+        <div
+          className={`mt-3 rounded-xl px-3 py-2 text-xs font-bold ${pending ? "bg-[#fff3cf] text-[#8b6500]" : status === "APPROVED" ? "bg-[#e7f6f0] text-[#267a60]" : "bg-[#f3f6f5] text-[#647a7c]"}`}
+        >
+          {statusLabel}
+          {latestRequest.data?.createdAt
+            ? ` · ${dateLabel(latestRequest.data.createdAt)}`
+            : ""}
+        </div>
+      )}
+      {!pending && (
+        <>
+          <label
+            htmlFor="subscription-request-note"
+            className="mt-3 block text-[11px] font-bold text-[#6f8385]"
+          >
+            ملاحظة للإدارة (اختياري)
+          </label>
+          <textarea
+            id="subscription-request-note"
+            value={note}
+            onChange={event => setNote(event.target.value)}
+            maxLength={500}
+            rows={2}
+            placeholder="اكتب رسالة مختصرة إن لزم"
+            className="mt-1 w-full resize-y rounded-xl border border-[#dfe9e5] bg-white px-3 py-2 text-xs text-[#29464e] outline-none focus:border-[#54b393]"
+          />
+        </>
+      )}
+      <button
+        type="submit"
+        disabled={pending || request.isPending || latestRequest.isLoading}
+        className="mt-3 inline-flex items-center justify-center gap-2 rounded-xl bg-[#0f5d4d] px-4 py-2.5 text-xs font-extrabold text-white hover:bg-[#0b493c] disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <Send size={14} />
+        {pending
+          ? "تم استلام الطلب"
+          : request.isPending
+            ? "جارٍ الإرسال..."
+            : "إرسال طلب الاشتراك"}
+      </button>
+    </form>
+  );
+}
 
 export function SubscriptionExpiredView({
   access,
@@ -38,8 +134,8 @@ export function SubscriptionExpiredView({
           </div>
           <h1 className="mt-4 text-2xl font-extrabold">انتهى اشتراك المتجر</h1>
           <p className="mt-2 text-sm leading-7 text-[#f1c6c1]">
-            تم إيقاف الوصول إلى شاشات المتجر حتى تجديد الاشتراك. تواصل مع المدير
-            لتفعيل الحساب.
+            تم إيقاف الوصول إلى شاشات المتجر حتى تجديد الاشتراك. يمكنك إرسال طلب
+            إلى الإدارة أو التواصل مباشرة.
           </p>
         </div>
         <div className="space-y-4 p-6">
@@ -60,6 +156,7 @@ export function SubscriptionExpiredView({
               حالة الدفع: {access?.isPaid ? "مدفوع" : "غير مدفوع"}
             </div>
           </div>
+          <SubscriptionRequestPanel />
           <div className="grid gap-3 sm:grid-cols-2">
             <a
               href={whatsappLink}
@@ -100,13 +197,20 @@ export function SubscriptionView() {
     );
   if (!access)
     return (
-      <div className="rounded-2xl bg-white p-10 text-center text-sm text-[#829394]">
-        لا توجد بيانات اشتراك مرتبطة بهذا الحساب.
-      </div>
+      <section
+        className="soft-shadow mx-auto max-w-2xl space-y-4 rounded-2xl border border-[#e0e9e6] bg-white p-6"
+        dir="rtl"
+      >
+        <p className="text-sm text-[#829394]">
+          لا توجد بيانات اشتراك مرتبطة بهذا الحساب. أرسل طلبًا إلى الإدارة
+          لمراجعة التفعيل.
+        </p>
+        <SubscriptionRequestPanel />
+      </section>
     );
   return (
     <section
-      className="soft-shadow mx-auto max-w-2xl rounded-2xl border border-[#e0e9e6] bg-white p-6"
+      className="soft-shadow mx-auto max-w-2xl space-y-5 rounded-2xl border border-[#e0e9e6] bg-white p-6"
       dir="rtl"
     >
       <div className="flex items-center gap-3">
@@ -126,7 +230,7 @@ export function SubscriptionView() {
           </p>
         </div>
       </div>
-      <div className="mt-6 grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 sm:grid-cols-2">
         <div className="rounded-xl bg-[#f8fbfa] p-4">
           <div className="text-[11px] font-bold text-[#829394]">
             حالة الوصول
@@ -150,8 +254,9 @@ export function SubscriptionView() {
           </div>
         </div>
       </div>
+      <SubscriptionRequestPanel />
       {!access.isActive && (
-        <div className="mt-5 flex flex-wrap gap-3">
+        <div className="flex flex-wrap gap-3">
           <a
             href={whatsappLink}
             target="_blank"
