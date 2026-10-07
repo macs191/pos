@@ -19,11 +19,12 @@ export function BarcodeCameraScanner({
 }: BarcodeCameraScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const controlsRef = useRef<IScannerControls | null>(null);
+  const initializedOpenRef = useRef(false);
   const onDetectedRef = useRef(onDetected);
   const lastScanRef = useRef<{ value: string } | null>(null);
   const rearmTimerRef = useRef<number | null>(null);
   const completedSingleScanRef = useRef(false);
-  const [facingMode, setFacingMode] = useState<FacingMode>("environment");
+  const [facingMode, setFacingMode] = useState<FacingMode>("user");
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [detected, setDetected] = useState<string | null>(null);
@@ -33,7 +34,17 @@ export function BarcodeCameraScanner({
   }, [onDetected]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      initializedOpenRef.current = false;
+      return;
+    }
+    if (!initializedOpenRef.current) {
+      initializedOpenRef.current = true;
+      if (facingMode !== "user") {
+        setFacingMode("user");
+        return;
+      }
+    }
 
     let cancelled = false;
     setError(null);

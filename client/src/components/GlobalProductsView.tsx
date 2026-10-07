@@ -10,6 +10,7 @@ import {
   Boxes,
   Camera,
   Check,
+  Edit3,
   Loader2,
   Plus,
   Search,
@@ -32,6 +33,7 @@ export function GlobalProductsView() {
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
   const [showPriceForm, setShowPriceForm] = useState(false);
+  const [manualEntry, setManualEntry] = useState(false);
   const [voiceField, setVoiceField] = useState<"name" | "price" | null>(null);
   const input = useMemo(() => ({ search }), [search]);
   const products = trpc.products.list.useQuery(input, { retry: false });
@@ -41,12 +43,30 @@ export function GlobalProductsView() {
     setShowPriceForm(false);
     setVoiceField(null);
   };
-  const resumeScanner = () => {
-    closeDialog();
+  const clearProductFields = () => {
     setBarcode("");
     setName("");
     setPrice("");
+  };
+  const closeManualEntry = () => {
+    closeDialog();
+    setCameraOpen(false);
+    setManualEntry(false);
+    clearProductFields();
+  };
+  const resumeScanner = () => {
+    closeDialog();
+    setManualEntry(false);
+    clearProductFields();
     window.setTimeout(() => setCameraOpen(true), 180);
+  };
+  const finishCurrentFlow = () => {
+    if (manualEntry) closeManualEntry();
+    else resumeScanner();
+  };
+  const cancelDialog = () => {
+    if (manualEntry) closeManualEntry();
+    else resumeScanner();
   };
 
   const lookup = trpc.products.lookupByBarcode.useMutation({
@@ -77,7 +97,7 @@ export function GlobalProductsView() {
         "تمت إضافة المنتج إلى الكتالوج العام، وأصبح متاحًا لجميع المتاجر."
       );
       void products.refetch();
-      resumeScanner();
+      finishCurrentFlow();
     },
     onError: error => {
       toast.error(error.message);
@@ -88,21 +108,30 @@ export function GlobalProductsView() {
   const requestPrice = trpc.products.requestPriceChange.useMutation({
     onSuccess: () => {
       toast.success("أُرسل طلب تغيير السعر إلى مدير المنصة للموافقة.");
-      resumeScanner();
+      finishCurrentFlow();
     },
     onError: error => toast.error(error.message),
   });
 
   const openScanner = () => {
     closeDialog();
-    setBarcode("");
-    setName("");
-    setPrice("");
+    setManualEntry(false);
+    clearProductFields();
     setCameraOpen(true);
+  };
+
+  const openManualEntry = () => {
+    closeDialog();
+    setCameraOpen(false);
+    setManualEntry(true);
+    clearProductFields();
+    setVoiceField("name");
+    setDialogMode("NEW");
   };
 
   const handleScan = (value: string) => {
     setCameraOpen(false);
+    setManualEntry(false);
     setBarcode(value);
     setDialogMode(null);
     lookup.mutate({ barcode: value });
@@ -110,6 +139,11 @@ export function GlobalProductsView() {
 
   const saveNewProduct = (event?: React.FormEvent) => {
     event?.preventDefault();
+    if (createProduct.isPending) return;
+    if (!barcode.trim()) {
+      toast.error("أدخل رقم الباركود أو امسحه بالكاميرا.");
+      return;
+    }
     const sellingPrice = Number(price);
     if (!name.trim() || !Number.isFinite(sellingPrice) || sellingPrice < 0) {
       toast.error("أدخل اسم المنتج وسعرًا صالحًا.");
@@ -120,6 +154,7 @@ export function GlobalProductsView() {
 
   const sendPriceRequest = (event?: React.FormEvent) => {
     event?.preventDefault();
+    if (requestPrice.isPending) return;
     const requestedPrice = Number(price);
     if (!Number.isFinite(requestedPrice) || requestedPrice < 0) {
       toast.error("أدخل السعر المقترح بصورة صحيحة.");
@@ -134,20 +169,29 @@ export function GlobalProductsView() {
         saveNewProduct();
         return;
       }
-      if (voiceField === "name" || !name) {
-        setName(transcript.trim());
+      const phrase = parseVoiceProductPhrase(transcript);
+      const spokenPrice =
+        phrase.price ?? parseVoiceProductPhrase(`سعر ${transcript}`).price;
+      if (spokenPrice !== undefined) {
+        const recognizedName = phrase.price !== undefined ? phrase.name : "";
+        if (recognizedName) setName(recognizedName);
+        setPrice(String(spokenPrice));
+        setVoiceField(recognizedName || name.trim() ? null : "name");
+        speakArabic(
+          recognizedName || name.trim()
+            ? "تم تسجيل اسم المنتج وسعره. قل احفظ لإضافته."
+            : "تم تسجيل السعر. قل اسم المنتج."
+        );
+        return;
+      }
+      if (voiceField === "name" || !name.trim()) {
+        const spokenName = phrase.name || transcript.trim();
+        setName(spokenName);
         setVoiceField("price");
-        speakArabic("ما سعر المنتج؟");
+        speakArabic("تم تسجيل الاسم. ما سعر المنتج؟");
         return;
       }
-      const spokenPrice = parseVoiceProductPhrase(`سعر ${transcript}`).price;
-      if (spokenPrice === undefined) {
-        speakArabic("قل السعر، ثم قل احفظ.");
-        return;
-      }
-      setPrice(String(spokenPrice));
-      setVoiceField(null);
-      speakArabic("تم تسجيل السعر. قل احفظ لإضافة المنتج.");
+      speakArabic("قل السعر بالأرقام أو بالكلمات، ثم قل احفظ.");
       return;
     }
     if (dialogMode === "EXISTING") {
@@ -156,7 +200,9 @@ export function GlobalProductsView() {
         else resumeScanner();
         return;
       }
-      const spokenPrice = parseVoiceProductPhrase(`سعر ${transcript}`).price;
+      const spokenPrice =
+        parseVoiceProductPhrase(transcript).price ??
+        parseVoiceProductPhrase(`سعر ${transcript}`).price;
       if (spokenPrice === undefined) {
         speakArabic("قل السعر الجديد أو قل احفظ لإنهاء المسح.");
         return;
@@ -171,27 +217,43 @@ export function GlobalProductsView() {
 
   return (
     <div className="space-y-5">
-      <section className="overflow-hidden rounded-2xl bg-[#071723] p-5 text-white sm:p-6">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 text-xs font-bold text-[#b8efdc]">
-              <Boxes size={15} /> كتالوج مشترك بين المتاجر
+      <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#071723] via-[#0b2a38] to-[#0d5948] p-5 text-white shadow-[0_18px_55px_rgba(7,23,35,0.16)] sm:p-7">
+        <div className="pointer-events-none absolute -left-12 -top-24 h-64 w-64 rounded-full border-[34px] border-[#b8efdc]/[0.07]" />
+        <div className="pointer-events-none absolute -bottom-28 right-1/3 h-48 w-48 rounded-full bg-[#b8efdc]/[0.05] blur-2xl" />
+        <div className="relative flex flex-col justify-between gap-6 lg:flex-row lg:items-center">
+          <div className="max-w-2xl">
+            <div className="inline-flex items-center gap-2 rounded-full border border-[#b8efdc]/20 bg-white/[0.06] px-3 py-1.5 text-[11px] font-bold text-[#c8f4e5]">
+              <Boxes size={14} /> كتالوج مشترك بين المتاجر
             </div>
-            <h2 className="mt-2 text-xl font-extrabold sm:text-2xl">
+            <h2 className="mt-3 text-2xl font-extrabold tracking-tight sm:text-3xl">
               المنتجات والأسعار العامة
             </h2>
-            <p className="mt-1 max-w-2xl text-xs leading-6 text-[#a9c0c1]">
-              امسح الباركود؛ أضف الاسم والسعر إذا كان جديدًا. طلب تغيير سعر منتج
-              موجود يظل معلقًا حتى موافقة مدير المنصة.
+            <p className="mt-2 max-w-xl text-xs leading-6 text-[#bfd2d2]">
+              امسح الباركود بالكاميرا الأمامية أو أدخله يدويًا، ثم اكتب أو
+              استخدم الإملاء الصوتي لاسم المنتج وسعره. طلبات تغيير الأسعار تظل
+              بانتظار موافقة المدير.
             </p>
+            <div className="mt-4 inline-flex items-center gap-2 rounded-lg bg-black/15 px-3 py-1.5 text-[11px] text-[#c4d9d6]">
+              <span className="h-1.5 w-1.5 rounded-full bg-[#b8efdc]" />
+              {products.data?.length ?? 0} منتج ظاهر في هذا البحث
+            </div>
           </div>
-          <button
-            type="button"
-            onClick={openScanner}
-            className="flex items-center gap-2 rounded-xl bg-[#b8efdc] px-4 py-3 text-sm font-extrabold text-[#08231e] hover:bg-[#d4faec]"
-          >
-            <Camera size={17} /> إضافة منتج بالباركود
-          </button>
+          <div className="grid shrink-0 gap-2 sm:grid-cols-2 lg:w-[330px] lg:grid-cols-1">
+            <button
+              type="button"
+              onClick={openScanner}
+              className="flex items-center justify-center gap-2 rounded-2xl bg-[#b8efdc] px-5 py-3.5 text-sm font-extrabold text-[#08231e] shadow-lg shadow-black/10 transition hover:-translate-y-0.5 hover:bg-[#d4faec]"
+            >
+              <Camera size={18} /> مسح بالكاميرا
+            </button>
+            <button
+              type="button"
+              onClick={openManualEntry}
+              className="flex items-center justify-center gap-2 rounded-2xl border border-white/20 bg-white/[0.08] px-5 py-3.5 text-sm font-bold text-white transition hover:bg-white/[0.14]"
+            >
+              <Edit3 size={17} /> إضافة يدويًا أو بالصوت
+            </button>
+          </div>
         </div>
       </section>
 
@@ -269,24 +331,29 @@ export function GlobalProductsView() {
               لا توجد منتجات في هذا البحث
             </div>
             <p className="mt-2 max-w-sm text-xs leading-6 text-[#7b8d8e]">
-              امسح باركود منتج لإضافته إلى الكتالوج العام. لا يتم حفظ المخزون أو
-              الوزن.
+              ابدأ بمسح الباركود أو أدخله يدويًا لإضافة المنتج إلى الكتالوج
+              العام. لا يتم حفظ المخزون أو الوزن.
             </p>
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              <button
+                type="button"
+                onClick={openScanner}
+                className="flex items-center gap-2 rounded-xl bg-[#0f5d4d] px-4 py-2.5 text-xs font-extrabold text-white"
+              >
+                <Camera size={15} /> مسح باركود
+              </button>
+              <button
+                type="button"
+                onClick={openManualEntry}
+                className="flex items-center gap-2 rounded-xl border border-[#dce9e4] bg-white px-4 py-2.5 text-xs font-bold text-[#42615e]"
+              >
+                <Edit3 size={14} /> إدخال يدوي
+              </button>
+            </div>
           </div>
         )}
       </section>
 
-      <VoiceCommandButton
-        onTranscript={handleVoice}
-        prompt={
-          dialogMode === "NEW"
-            ? voiceField === "price"
-              ? "قل السعر، ثم قل احفظ"
-              : "قل اسم المنتج"
-            : "تحدث لإدخال السعر أو قل احفظ"
-        }
-        className="fixed bottom-20 left-4 z-[45] shadow-xl lg:bottom-5"
-      />
       <BarcodeCameraScanner
         open={cameraOpen}
         onClose={() => setCameraOpen(false)}
@@ -303,7 +370,7 @@ export function GlobalProductsView() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="catalog-dialog-title"
-            className="w-full max-w-md overflow-hidden rounded-3xl border border-[#dce9e4] bg-white shadow-2xl"
+            className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-3xl border border-[#dce9e4] bg-white shadow-2xl"
           >
             <header className="flex items-start justify-between border-b border-[#e8efed] px-5 py-4">
               <div>
@@ -324,8 +391,10 @@ export function GlobalProductsView() {
               </div>
               <button
                 type="button"
-                onClick={resumeScanner}
-                aria-label="إغلاق والعودة للماسح"
+                onClick={cancelDialog}
+                aria-label={
+                  manualEntry ? "إغلاق نموذج الإضافة" : "إغلاق والعودة للماسح"
+                }
                 className="rounded-lg p-2 text-[#819293] hover:bg-[#f1f6f4]"
               >
                 <X size={18} />
@@ -333,21 +402,40 @@ export function GlobalProductsView() {
             </header>
             {dialogMode === "NEW" ? (
               <form onSubmit={saveNewProduct} className="space-y-4 p-5">
-                <div className="rounded-xl bg-[#f4f8f6] px-3 py-2">
-                  <div className="text-[10px] font-bold text-[#829394]">
-                    الباركود الممسوح
+                {manualEntry ? (
+                  <label className="block">
+                    <span className="mb-1.5 block text-[11px] font-extrabold text-[#597175]">
+                      رقم الباركود
+                    </span>
+                    <input
+                      required
+                      autoFocus
+                      inputMode="numeric"
+                      minLength={3}
+                      maxLength={80}
+                      value={barcode}
+                      onChange={event => setBarcode(event.target.value)}
+                      placeholder="اكتب رقم الباركود"
+                      className="mono w-full rounded-xl border border-[#dfe9e5] bg-[#f8fbfa] px-3 py-3 text-sm outline-none focus:border-[#77bca8]"
+                    />
+                  </label>
+                ) : (
+                  <div className="rounded-xl bg-[#f4f8f6] px-3 py-2">
+                    <div className="text-[10px] font-bold text-[#829394]">
+                      الباركود الممسوح
+                    </div>
+                    <div className="mono mt-1 text-sm font-extrabold text-[#29464e]">
+                      {barcode}
+                    </div>
                   </div>
-                  <div className="mono mt-1 text-sm font-extrabold text-[#29464e]">
-                    {barcode}
-                  </div>
-                </div>
+                )}
                 <label className="block">
                   <span className="mb-1.5 block text-[11px] font-extrabold text-[#597175]">
                     اسم المنتج
                   </span>
                   <input
                     required
-                    autoFocus
+                    autoFocus={!manualEntry}
                     minLength={2}
                     maxLength={200}
                     value={name}
@@ -371,9 +459,39 @@ export function GlobalProductsView() {
                     className="w-full rounded-xl border border-[#dfe9e5] px-3 py-3 text-sm outline-none focus:border-[#77bca8]"
                   />
                 </label>
+                <div className="space-y-3 rounded-2xl border border-[#cfe4dc] bg-gradient-to-br from-[#f0faf5] to-[#f7fbf9] p-3">
+                  <div>
+                    <div className="text-xs font-extrabold text-[#235d4b]">
+                      الإدخال بالصوت
+                    </div>
+                    <p className="mt-1 text-[10px] leading-5 text-[#6f8982]">
+                      {voiceField === "price"
+                        ? "قل السعر الآن، أو انطق اسم المنتج والسعر معًا."
+                        : !name.trim()
+                          ? "قل اسم المنتج، ويمكنك نطق السعر في الجملة نفسها."
+                          : !price
+                            ? "اكتب أو انطق السعر المقترح للمنتج."
+                            : "راجع الاسم والسعر، ثم قل «احفظ» أو اضغط زر الحفظ."}
+                    </p>
+                  </div>
+                  <VoiceCommandButton
+                    onTranscript={handleVoice}
+                    prompt={
+                      voiceField === "price"
+                        ? "قل السعر، أو قل اسم المنتج والسعر معًا"
+                        : !name.trim()
+                          ? "قل اسم المنتج، ويمكنك ذكر السعر معه"
+                          : !price
+                            ? "قل السعر أو اسم المنتج والسعر معًا"
+                            : "قل احفظ لإضافة المنتج"
+                    }
+                    className="w-full justify-center py-2.5"
+                    speakPrompt={false}
+                  />
+                </div>
                 <p className="text-[11px] leading-5 text-[#849596]">
-                  سيظهر هذا المنتج وسعره مباشرة لجميع المتاجر بعد الحفظ. لا يتم
-                  تسجيل كمية أو وزن.
+                  سيظهر المنتج وسعره لجميع المتاجر بعد الحفظ. لا يتم تسجيل كمية
+                  أو وزن.
                 </p>
                 <div className="flex gap-2">
                   <button
@@ -385,11 +503,11 @@ export function GlobalProductsView() {
                     ) : (
                       <Plus size={16} />
                     )}{" "}
-                    حفظ والعودة للمسح
+                    {manualEntry ? "حفظ المنتج" : "حفظ والعودة للمسح"}
                   </button>
                   <button
                     type="button"
-                    onClick={resumeScanner}
+                    onClick={cancelDialog}
                     className="rounded-xl border border-[#dfe9e5] px-4 text-xs font-bold text-[#526c70]"
                   >
                     إلغاء
@@ -408,6 +526,21 @@ export function GlobalProductsView() {
                   <div className="mt-1 text-xs font-bold text-[#287e64]">
                     السعر الحالي: {money(currentPrice)}
                   </div>
+                </div>
+                <div className="space-y-2 rounded-2xl border border-[#cfe4dc] bg-[#f4faf7] p-3">
+                  <p className="text-[10px] leading-5 text-[#6f8982]">
+                    استخدم الصوت لنطق السعر المقترح أو لإنهاء المسح صوتيًا.
+                  </p>
+                  <VoiceCommandButton
+                    onTranscript={handleVoice}
+                    prompt={
+                      showPriceForm
+                        ? "قل السعر الجديد أو قل احفظ لإرسال الطلب"
+                        : "قل السعر المقترح أو قل احفظ للعودة للماسح"
+                    }
+                    className="w-full justify-center py-2.5"
+                    speakPrompt={false}
+                  />
                 </div>
                 {showPriceForm ? (
                   <form onSubmit={sendPriceRequest} className="space-y-3">
@@ -465,10 +598,12 @@ export function GlobalProductsView() {
                     </button>
                     <button
                       type="button"
-                      onClick={resumeScanner}
+                      onClick={cancelDialog}
                       className="rounded-xl border border-[#dfe9e5] py-3 text-sm font-bold text-[#526c70]"
                     >
-                      السعر صحيح — مسح منتج آخر
+                      {manualEntry
+                        ? "السعر صحيح — إغلاق"
+                        : "السعر صحيح — مسح منتج آخر"}
                     </button>
                   </div>
                 )}
