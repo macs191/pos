@@ -1,26 +1,29 @@
 export type PosProduct = {
-  id: number;
+  id: string;
   name: string;
   barcode: string;
   sellingPrice: number | string;
-  stockQuantity: number | string;
-  unit: string;
+  unit?: string;
 };
 
 export type PosCartLine = {
-  id: number;
+  id: string;
   name: string;
   barcode: string;
   price: number;
   qty: number;
-  stock: number;
   unit: string;
 };
 
-export function addProductToCart(cart: PosCartLine[], product: PosProduct): PosCartLine[] {
+export function addProductToCart(
+  cart: PosCartLine[],
+  product: PosProduct
+): PosCartLine[] {
   const existing = cart.find(line => line.id === product.id);
   if (existing) {
-    return cart.map(line => line.id === product.id ? { ...line, qty: line.qty + 1 } : line);
+    return cart.map(line =>
+      line.id === product.id ? { ...line, qty: line.qty + 1 } : line
+    );
   }
   return [
     ...cart,
@@ -30,8 +33,7 @@ export function addProductToCart(cart: PosCartLine[], product: PosProduct): PosC
       barcode: product.barcode,
       price: Number(product.sellingPrice),
       qty: 1,
-      stock: Number(product.stockQuantity),
-      unit: product.unit,
+      unit: product.unit || "قطعة",
     },
   ];
 }

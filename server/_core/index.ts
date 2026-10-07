@@ -8,6 +8,7 @@ import { registerStorageProxy } from "./storageProxy.js";
 import { appRouter } from "../routers.js";
 import { createContext } from "./context.js";
 import { serveStatic, setupVite } from "./vite.js";
+import { runWithFirebaseToken } from "../firebase.js";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -36,6 +37,13 @@ export function createApp() {
   registerStorageProxy(app);
   registerOAuthRoutes(app);
   // tRPC API
+  app.use("/api/trpc", (req, _res, next) => {
+    const authorization = req.headers.authorization;
+    if (authorization?.startsWith("Bearer ")) {
+      return runWithFirebaseToken(authorization.slice(7), () => next());
+    }
+    next();
+  });
   app.use(
     "/api/trpc",
     createExpressMiddleware({
