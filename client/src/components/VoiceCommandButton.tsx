@@ -1,7 +1,9 @@
 import { Mic, MicOff } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-type SpeechRecognitionEventLike = Event & { results: { [index: number]: { [index: number]: { transcript: string } } } };
+type SpeechRecognitionEventLike = Event & {
+  results: { [index: number]: { [index: number]: { transcript: string } } };
+};
 type SpeechRecognitionInstance = {
   lang: string;
   interimResults: boolean;
@@ -25,6 +27,8 @@ type VoiceCommandButtonProps = {
   onTranscript: (transcript: string) => void;
   prompt?: string;
   className?: string;
+  speakPrompt?: boolean;
+  buttonLabel?: string;
 };
 
 export function speakArabic(text: string) {
@@ -37,18 +41,29 @@ export function speakArabic(text: string) {
   window.speechSynthesis.speak(utterance);
 }
 
-export function VoiceCommandButton({ onTranscript, prompt = "تحدث الآن", className = "" }: VoiceCommandButtonProps) {
+export function VoiceCommandButton({
+  onTranscript,
+  prompt = "تحدث الآن",
+  className = "",
+  speakPrompt = true,
+  buttonLabel = "تحكم صوتي",
+}: VoiceCommandButtonProps) {
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const [listening, setListening] = useState(false);
   const [unsupported, setUnsupported] = useState(false);
 
-  useEffect(() => () => { recognitionRef.current?.stop(); }, []);
+  useEffect(() => () => recognitionRef.current?.stop(), []);
 
   const toggle = () => {
-    const Recognition = typeof window !== "undefined" ? (window.SpeechRecognition || window.webkitSpeechRecognition) : undefined;
+    const Recognition =
+      typeof window !== "undefined"
+        ? window.SpeechRecognition || window.webkitSpeechRecognition
+        : undefined;
     if (!Recognition) {
       setUnsupported(true);
-      speakArabic("المتصفح لا يدعم الأوامر الصوتية. استخدم Chrome على أندرويد.");
+      speakArabic(
+        "المتصفح لا يدعم الأوامر الصوتية. استخدم Chrome على أندرويد."
+      );
       return;
     }
     if (listening) {
@@ -56,28 +71,58 @@ export function VoiceCommandButton({ onTranscript, prompt = "تحدث الآن",
       setListening(false);
       return;
     }
+
     const recognition = new Recognition();
     recognition.lang = "ar-EG";
     recognition.interimResults = false;
     recognition.continuous = false;
     recognition.onresult = event => {
       const transcript = event.results[0]?.[0]?.transcript?.trim();
+      recognition.stop();
       if (transcript) onTranscript(transcript);
     };
     recognition.onerror = event => {
       setListening(false);
-      if (event.error === "not-allowed" || event.error === "service-not-allowed") speakArabic("اسمح باستخدام الميكروفون من إعدادات المتصفح.");
+      if (
+        event.error === "not-allowed" ||
+        event.error === "service-not-allowed"
+      ) {
+        speakArabic("اسمح باستخدام الميكروفون من إعدادات المتصفح.");
+      }
     };
     recognition.onend = () => setListening(false);
     recognitionRef.current = recognition;
     try {
       recognition.start();
       setListening(true);
-      speakArabic(prompt);
+      if (speakPrompt) speakArabic(prompt);
     } catch {
       setListening(false);
     }
   };
 
-  return <div className="flex items-center gap-2"><button type="button" onClick={toggle} aria-label={listening ? "إيقاف الاستماع" : "التحدث بالصوت"} className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-extrabold transition-colors ${listening ? "bg-[#b4484b] text-white" : "bg-[#e7f5f0] text-[#267a60]"} ${className}`}><span className="relative flex h-4 w-4 items-center justify-center">{listening ? <MicOff size={15} /> : <Mic size={15} />}{listening && <span className="absolute -inset-1 animate-ping rounded-full bg-[#ffb3aa]/30" />}</span>{listening ? "إيقاف الاستماع" : "تحكم صوتي"}</button>{unsupported && <span className="text-[10px] text-[#a83d42]">يحتاج Chrome Android</span>}</div>;
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        onClick={toggle}
+        aria-label={listening ? "إيقاف الاستماع" : "التحدث بالصوت"}
+        aria-pressed={listening}
+        className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-extrabold transition-colors ${listening ? "bg-[#b4484b] text-white" : "bg-[#e7f5f0] text-[#267a60]"} ${className}`}
+      >
+        <span className="relative flex h-4 w-4 items-center justify-center">
+          {listening ? <MicOff size={15} /> : <Mic size={15} />}
+          {listening && (
+            <span className="absolute -inset-1 animate-ping rounded-full bg-[#ffb3aa]/30" />
+          )}
+        </span>
+        {listening ? "جارٍ الاستماع..." : buttonLabel}
+      </button>
+      {unsupported && (
+        <span className="text-[10px] text-[#a83d42]">
+          يحتاج Chrome على Android
+        </span>
+      )}
+    </div>
+  );
 }

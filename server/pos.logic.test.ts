@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { addProductToCart, cartSubtotal, invoiceTotal } from "../shared/pos.js";
-import { buildInvoiceAnnouncement, isNewInvoiceVoiceCommand, isSaveVoiceCommand, parseVoiceProductPhrase } from "../shared/voice.js";
+import {
+  buildInvoiceAnnouncement,
+  isNewInvoiceVoiceCommand,
+  isSaveVoiceCommand,
+  parseVoiceProductPhrase,
+} from "../shared/voice.js";
 
 describe("POS cart logic", () => {
   const product = {
@@ -33,8 +38,23 @@ describe("POS cart logic", () => {
   });
 
   it("parses Arabic product name, spoken price, and quantity", () => {
-    expect(parseVoiceProductPhrase("أريد مياه معدنية بخمسة عدد ثلاثة")).toMatchObject({ name: "مياه معدنية", price: 5, quantity: 3 });
+    expect(
+      parseVoiceProductPhrase("أريد مياه معدنية بخمسة عدد ثلاثة")
+    ).toMatchObject({ name: "مياه معدنية", price: 5, quantity: 3 });
     expect(isNewInvoiceVoiceCommand("اعمل فاتورة جديدة")).toBe(true);
     expect(isSaveVoiceCommand("احفظ")).toBe(true);
+  });
+
+  it("parses voice product details with compound Arabic numbers", () => {
+    expect(
+      parseVoiceProductPhrase("أضف مياه معدنية بسعر خمسة وعشرين جنيه")
+    ).toMatchObject({ name: "مياه معدنية", price: 25, quantity: 1 });
+  });
+
+  it("accepts Arabic numerals and keeps ordinary ba-prefixed product names", () => {
+    expect(
+      parseVoiceProductPhrase("لبن بالنعناع سعره ١٢٫٥٠ جنيه")
+    ).toMatchObject({ name: "لبن بالنعناع", price: 12.5 });
+    expect(parseVoiceProductPhrase("مياه بالنعناع").name).toBe("مياه بالنعناع");
   });
 });
