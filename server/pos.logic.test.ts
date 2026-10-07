@@ -8,6 +8,8 @@ describe("POS cart logic", () => {
     name: "مياه معدنية",
     barcode: "6221234567890",
     sellingPrice: "5.50",
+    stockQuantity: "12",
+    unit: "قطعة",
   };
 
   it("aggregates repeated barcode scans into one cart line", () => {

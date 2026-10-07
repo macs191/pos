@@ -25,7 +25,6 @@ type VoiceCommandButtonProps = {
   onTranscript: (transcript: string) => void;
   prompt?: string;
   className?: string;
-  continuous?: boolean;
 };
 
 export function speakArabic(text: string) {
@@ -38,7 +37,7 @@ export function speakArabic(text: string) {
   window.speechSynthesis.speak(utterance);
 }
 
-export function VoiceCommandButton({ onTranscript, prompt = "تحدث الآن", className = "", continuous = false }: VoiceCommandButtonProps) {
+export function VoiceCommandButton({ onTranscript, prompt = "تحدث الآن", className = "" }: VoiceCommandButtonProps) {
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const [listening, setListening] = useState(false);
   const [unsupported, setUnsupported] = useState(false);
@@ -60,7 +59,7 @@ export function VoiceCommandButton({ onTranscript, prompt = "تحدث الآن",
     const recognition = new Recognition();
     recognition.lang = "ar-EG";
     recognition.interimResults = false;
-    recognition.continuous = continuous;
+    recognition.continuous = false;
     recognition.onresult = event => {
       const transcript = event.results[0]?.[0]?.transcript?.trim();
       if (transcript) onTranscript(transcript);

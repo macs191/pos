@@ -1,16 +1,20 @@
 export type PosProduct = {
-  id: number | string;
+  id: number;
   name: string;
   barcode: string;
   sellingPrice: number | string;
+  stockQuantity: number | string;
+  unit: string;
 };
 
 export type PosCartLine = {
-  id: number | string;
+  id: number;
   name: string;
   barcode: string;
   price: number;
   qty: number;
+  stock: number;
+  unit: string;
 };
 
 export function addProductToCart(cart: PosCartLine[], product: PosProduct): PosCartLine[] {
@@ -26,6 +30,8 @@ export function addProductToCart(cart: PosCartLine[], product: PosProduct): PosC
       barcode: product.barcode,
       price: Number(product.sellingPrice),
       qty: 1,
+      stock: Number(product.stockQuantity),
+      unit: product.unit,
     },
   ];
 }
