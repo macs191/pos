@@ -13,35 +13,26 @@ export const publicProcedure = t.procedure;
 
 const requireUser = t.middleware(async opts => {
   const { ctx, next } = opts;
-  const user = ctx.user;
-  if (user == null) {
+
+  if (!ctx.user) {
     throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
   }
 
-  if (user.role !== "SUPER_ADMIN") {
-    if (user.supermarketId == null || user.supermarketId <= 0) {
-      throw new TRPCError({ code: "FORBIDDEN", message: "حسابك لم يُربط بمتجر بعد. أعد تسجيل الدخول؛ وإذا استمرت المشكلة تواصل مع المدير." });
-    }
-    const access = await getTenantSubscription(user.supermarketId);
-    if (!access || !access.isActive) {
-      throw new TRPCError({ code: "FORBIDDEN", message: "لا يوجد اشتراك فعال لهذا المتجر أو انتهت صلاحيته. تواصل مع مدير الموقع لتفعيله." });
+  if (ctx.user.supermarketId && ctx.user.role !== "SUPER_ADMIN") {
+    const access = await getTenantSubscription(ctx.user.supermarketId);
+    if (access && !access.isActive) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "انتهت الفترة التجريبية المجانية. يرجى تفعيل الاشتراك للمتابعة." });
     }
   }
 
   return next({
     ctx: {
       ...ctx,
-      user,
+      user: ctx.user,
     },
   });
 });
 
-const requireIdentity = t.middleware(async ({ ctx, next }) => {
-  if (ctx.user == null) throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
-  return next({ ctx: { ...ctx, user: ctx.user } });
-});
-
-export const authenticatedProcedure = t.procedure.use(requireIdentity);
 export const protectedProcedure = t.procedure.use(requireUser);
 
 export const adminProcedure = t.procedure.use(

@@ -7,7 +7,6 @@ import { registerOAuthRoutes } from "./oauth.js";
 import { registerStorageProxy } from "./storageProxy.js";
 import { appRouter } from "../routers.js";
 import { createContext } from "./context.js";
-import { firebaseIdTokenFromAuthorization, runWithFirebaseIdToken } from "../firebase.js";
 import { serveStatic, setupVite } from "./vite.js";
 
 function isPortAvailable(port: number): Promise<boolean> {
@@ -37,11 +36,13 @@ export function createApp() {
   registerStorageProxy(app);
   registerOAuthRoutes(app);
   // tRPC API
-  const trpcHandler = createExpressMiddleware({ router: appRouter, createContext });
-  app.use("/api/trpc", (req, res, next) => runWithFirebaseIdToken(
-    firebaseIdTokenFromAuthorization(req.headers.authorization),
-    () => trpcHandler(req, res, next),
-  ));
+  app.use(
+    "/api/trpc",
+    createExpressMiddleware({
+      router: appRouter,
+      createContext,
+    })
+  );
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
     // Vite middleware is attached by startServer because it needs the HTTP server for HMR.
