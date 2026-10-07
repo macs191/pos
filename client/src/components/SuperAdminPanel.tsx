@@ -469,7 +469,7 @@ export function SuperAdminPanel() {
               </tr>
             </thead>
             <tbody>
-              {accounts.data?.map(({ store, access }) => (
+              {accounts.data?.filter(Boolean).map(({ store, access }) => (
                 <tr key={store.id} className="border-t border-[#eef3f1]">
                   <td className="px-3 py-3 font-extrabold text-[#34515a]">
                     {store.name}
@@ -571,7 +571,7 @@ export function SuperAdminPanel() {
               </tr>
             </thead>
             <tbody>
-              {users.data?.map(user => (
+              {users.data?.filter(Boolean).map(user => (
                 <tr key={user.id} className="border-t border-[#eef3f1]">
                   <td className="px-3 py-3">
                     <div className="font-extrabold text-[#34515a]">

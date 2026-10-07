@@ -1,6 +1,7 @@
 import type { User } from "../drizzle/schema.js";
 import { firebaseRealtimeDb } from "./firebase.js";
 import { ENV } from "./_core/env.js";
+import { normalizeTableRows } from "./table-data.js";
 import {
   applyApprovedPriceChange,
   buildGlobalProductRecord,
@@ -32,8 +33,8 @@ async function read<T>(path: string): Promise<T | null> {
 }
 
 async function readTable<T extends AnyRecord>(table: string): Promise<T[]> {
-  const value = await read<Record<string, T>>(table);
-  return value ? Object.values(value) : [];
+  const value = await read<unknown>(table);
+  return normalizeTableRows<T>(value);
 }
 
 async function nextId(table: string) {
