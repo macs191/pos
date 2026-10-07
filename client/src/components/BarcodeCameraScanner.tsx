@@ -24,7 +24,7 @@ export function BarcodeCameraScanner({
   const lastScanRef = useRef<{ value: string } | null>(null);
   const rearmTimerRef = useRef<number | null>(null);
   const completedSingleScanRef = useRef(false);
-  const [facingMode, setFacingMode] = useState<FacingMode>("user");
+  const [facingMode, setFacingMode] = useState<FacingMode>("environment");
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [detected, setDetected] = useState<string | null>(null);
@@ -40,8 +40,8 @@ export function BarcodeCameraScanner({
     }
     if (!initializedOpenRef.current) {
       initializedOpenRef.current = true;
-      if (facingMode !== "user") {
-        setFacingMode("user");
+      if (facingMode !== "environment") {
+        setFacingMode("environment");
         return;
       }
     }
@@ -231,6 +231,14 @@ export function BarcodeCameraScanner({
                 جرّب الكاميرا{" "}
                 {facingMode === "environment" ? "الأمامية" : "الخلفية"}
               </button>
+              <a
+                href={`https://wa.me/201033148828?text=${encodeURIComponent("أواجه مشكلة في كاميرا ماسح الباركود. الرجاء المساعدة.")}`}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-3 rounded-lg border border-[#315362] px-3 py-2 text-xs font-bold text-[#c8dddd] hover:bg-[#123245]"
+              >
+                الإبلاغ عن المشكلة عبر واتساب
+              </a>
             </div>
           )}
         </div>
