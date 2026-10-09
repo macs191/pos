@@ -7,39 +7,52 @@ type BeforeInstallPromptEvent = Event & {
   userChoice: Promise<InstallChoice>;
 };
 
+let pendingInstallPrompt: BeforeInstallPromptEvent | null = null;
+let appWasInstalled = false;
+
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeinstallprompt", event => {
+    event.preventDefault();
+    pendingInstallPrompt = event as BeforeInstallPromptEvent;
+    window.dispatchEvent(new Event("souqi:beforeinstallprompt"));
+  });
+  window.addEventListener("appinstalled", () => {
+    appWasInstalled = true;
+    pendingInstallPrompt = null;
+    window.dispatchEvent(new Event("souqi:appinstalled"));
+  });
+}
+
 function isStandaloneMode() {
   const nav = navigator as Navigator & { standalone?: boolean };
   return nav.standalone === true || window.matchMedia?.("(display-mode: standalone)").matches === true;
 }
 
 export function PwaInstallButton() {
-  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
-  const [installed, setInstalled] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(() => pendingInstallPrompt);
+  const [installed, setInstalled] = useState(() => appWasInstalled || isStandaloneMode());
   const [isIos, setIsIos] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
 
   useEffect(() => {
-    setInstalled(isStandaloneMode());
+    setInstalled(isStandaloneMode() || appWasInstalled);
     const userAgent = navigator.userAgent.toLowerCase();
     const ios = /iphone|ipad|ipod/.test(userAgent) ||
       (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
     setIsIos(ios);
 
-    const onBeforeInstall = (event: Event) => {
-      event.preventDefault();
-      setDeferredPrompt(event as BeforeInstallPromptEvent);
-    };
+    const onBeforeInstall = () => setDeferredPrompt(pendingInstallPrompt);
     const onInstalled = () => {
       setInstalled(true);
       setDeferredPrompt(null);
       setHelpOpen(false);
     };
 
-    window.addEventListener("beforeinstallprompt", onBeforeInstall);
-    window.addEventListener("appinstalled", onInstalled);
+    window.addEventListener("souqi:beforeinstallprompt", onBeforeInstall);
+    window.addEventListener("souqi:appinstalled", onInstalled);
     return () => {
-      window.removeEventListener("beforeinstallprompt", onBeforeInstall);
-      window.removeEventListener("appinstalled", onInstalled);
+      window.removeEventListener("souqi:beforeinstallprompt", onBeforeInstall);
+      window.removeEventListener("souqi:appinstalled", onInstalled);
     };
   }, []);
 
@@ -51,6 +64,7 @@ export function PwaInstallButton() {
       return;
     }
     const prompt = deferredPrompt;
+    pendingInstallPrompt = null;
     setDeferredPrompt(null);
     try {
       await prompt.prompt();

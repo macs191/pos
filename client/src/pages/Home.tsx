@@ -204,12 +204,15 @@ function PublicWelcome({
               <div className="text-xs text-[#9ab3b6]">نظام تشغيل متجرك</div>
             </div>
           </div>
-          <button
-            onClick={openLogin}
-            className="rounded-xl border border-[#3b5964] px-4 py-2 text-sm font-bold text-[#d7e9e4] hover:bg-[#123245]"
-          >
-            {loading ? "جارٍ التحميل" : "تسجيل الدخول"}
-          </button>
+          <div className="flex items-center gap-2">
+            <PwaInstallButton />
+            <button
+              onClick={openLogin}
+              className="rounded-xl border border-[#3b5964] px-4 py-2 text-sm font-bold text-[#d7e9e4] hover:bg-[#123245]"
+            >
+              {loading ? "جارٍ التحميل" : "تسجيل الدخول"}
+            </button>
+          </div>
         </header>
         <main className="grid flex-1 items-center gap-12 py-16 lg:grid-cols-[1.05fr_0.95fr]">
           <section>
