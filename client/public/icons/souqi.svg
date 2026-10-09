@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="سوقي">
+  <rect width="512" height="512" rx="108" fill="#071723"/>
+  <circle cx="256" cy="256" r="196" fill="#0e4d45"/>
+  <path d="M164 226c0-61 41-108 92-108s92 47 92 108" fill="none" stroke="#b8efdc" stroke-width="20" stroke-linecap="round"/>
+  <path d="M142 220h228l-22 148c-2 13-13 23-26 23H190c-13 0-24-10-26-23z" fill="#071723" stroke="#b8efdc" stroke-width="20" stroke-linejoin="round"/>
+  <path d="M204 239v125M256 239v125M308 239v125M168 285h176M162 326h188" fill="none" stroke="#b8efdc" stroke-width="13" stroke-linecap="round" opacity=".92"/>
+  <circle cx="202" cy="413" r="12" fill="#b8efdc"/>
+  <circle cx="310" cy="413" r="12" fill="#b8efdc"/>
+</svg>

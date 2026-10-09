@@ -27,6 +27,7 @@ import {
   listInvoices,
   listSubscriptionRequests,
   listPriceChangeRequests,
+  listPriceChangeRequestsForStore,
   listUsers,
   resolvePriceChangeRequest,
   resolveSubscriptionRequest,
@@ -211,6 +212,12 @@ export const appRouter = router({
           return mapError(error);
         }
       }),
+    myPriceChangeRequests: protectedProcedure.query(({ ctx }) => {
+      const supermarketId = getTenantIdFromUser(ctx.user);
+      return supermarketId === null
+        ? []
+        : listPriceChangeRequestsForStore(supermarketId);
+    }),
   }),
   pos: router({
     createInvoice: protectedProcedure

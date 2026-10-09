@@ -13,6 +13,7 @@ import {
   createPriceChangeRequest,
   normalizeBarcode,
   productKeyForBarcode,
+  projectStorePriceChangeRequests,
 } from "./catalog.logic.js";
 
 export const TRIAL_DAYS = 15;
@@ -489,6 +490,13 @@ export async function listPriceChangeRequests() {
   return (await readTable<AnyRecord>("priceChangeRequests"))
     .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
     .slice(0, 1000);
+}
+
+export async function listPriceChangeRequestsForStore(supermarketId: number) {
+  return projectStorePriceChangeRequests(
+    await readTable<AnyRecord>("priceChangeRequests"),
+    supermarketId
+  );
 }
 
 export async function resolvePriceChangeRequest(
