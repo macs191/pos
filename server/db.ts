@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { User } from "../drizzle/schema.js";
+import { pricesMatchAtSale } from "../shared/pos.js";
 import { firebaseRealtimeDb } from "./firebase.js";
 import { ENV } from "./_core/env.js";
 import { normalizeTableRows } from "./table-data.js";
@@ -716,6 +717,11 @@ export async function createInvoice(
     if (!Number.isSafeInteger(quantity) || quantity <= 0)
       throw new Error("INVALID_QUANTITY");
     const unitPrice = Number(product.sellingPrice);
+    if (
+      requested.expectedUnitPrice !== undefined &&
+      !pricesMatchAtSale(Number(requested.expectedUnitPrice), unitPrice)
+    )
+      throw new Error("PRODUCT_PRICE_CHANGED");
     lines.push({ product, quantity, unitPrice, total: unitPrice * quantity });
   }
   const subtotal = lines.reduce((sum, line) => sum + line.total, 0);

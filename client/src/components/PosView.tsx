@@ -78,6 +78,7 @@ export function PosView({ role, userId, online }: PosViewProps) {
     }
   });
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [checkoutBusy, setCheckoutBusy] = useState(false);
   const scanInputRef = useRef<HTMLInputElement>(null);
   const queueRef = useRef<string[]>([]);
   const processingRef = useRef(false);
@@ -266,10 +267,15 @@ export function PosView({ role, userId, online }: PosViewProps) {
     }
     if (checkoutPendingRef.current) return false;
     checkoutPendingRef.current = true;
+    setCheckoutBusy(true);
     setSaveError(null);
     try {
       const result = await createInvoice.mutateAsync({
-        items: lines.map(item => ({ productId: item.id, quantity: item.qty })),
+        items: lines.map(item => ({
+          productId: item.id,
+          quantity: item.qty,
+          expectedUnitPrice: item.price,
+        })),
         discount: 0,
         tax: 0,
         paymentMethod: "CASH",
@@ -283,15 +289,45 @@ export function PosView({ role, userId, online }: PosViewProps) {
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "تعذر حفظ الفاتورة.";
-      const recoveryMessage = `${message} احتفظنا بالسلة. إذا انقطع الاتصال أثناء الحفظ، افحص سجل الفواتير قبل إعادة المحاولة لتجنب تكرار الفاتورة.`;
+      let recoveryMessage = `${message} احتفظنا بالسلة. إذا انقطع الاتصال أثناء الحفظ، افحص سجل الفواتير قبل إعادة المحاولة لتجنب تكرار الفاتورة.`;
+      const priceChanged = message.includes("تغير سعر منتج في الكتالوج");
+      if (priceChanged) {
+        const refreshedProducts = await Promise.all(lines.map(async line => {
+          try {
+            return await lookup.mutateAsync({ barcode: line.barcode });
+          } catch {
+            return null;
+          }
+        }));
+        const latestById = new Map(
+          refreshedProducts
+            .filter((product): product is NonNullable<typeof product> => product !== null)
+            .map(product => [product.id, product])
+        );
+        if (latestById.size) {
+          updateCart(current => current.map(line => {
+            const product = latestById.get(line.id);
+            return product ? {
+              ...line,
+              name: product.name,
+              price: Number(product.sellingPrice),
+              unit: product.unit || line.unit,
+            } : line;
+          }));
+        }
+        recoveryMessage = latestById.size === lines.length
+          ? "تغير سعر منتج قبل الحفظ؛ لم تُنشأ الفاتورة. حدّثنا أسعار المنتجات المتاحة في السلة. راجع الإجمالي الجديد ثم اضغط حفظ مرة أخرى."
+          : "تغير سعر منتج قبل الحفظ؛ لم تُنشأ الفاتورة. تعذر تحديث بعض الأسعار؛ أعد فحص المنتجات المتأثرة قبل المحاولة مرة أخرى.";
+      }
       setSaveError(recoveryMessage);
-      toast.error("لم يصل تأكيد حفظ الفاتورة", { description: recoveryMessage });
+      toast.error(priceChanged ? "تغير سعر منتج قبل الحفظ" : "لم يصل تأكيد حفظ الفاتورة", { description: recoveryMessage });
       return false;
     } finally {
       checkoutPendingRef.current = false;
+      setCheckoutBusy(false);
       focusBarcodeField();
     }
-  }, [canPay, createInvoice, focusBarcodeField, online, resetCartAfterSuccess]);
+  }, [canPay, createInvoice, focusBarcodeField, lookup, online, resetCartAfterSuccess, updateCart]);
 
   const announceInvoiceTotal = (invoiceTotal: number) => {
     if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
@@ -313,6 +349,10 @@ export function PosView({ role, userId, online }: PosViewProps) {
   }, [queueBarcode]);
 
   const handleVoiceCommand = useCallback(async (transcript: string) => {
+    if (checkoutPendingRef.current) {
+      speakArabic("انتظر حتى ينتهي حفظ الفاتورة أو تحديث الأسعار.");
+      return;
+    }
     if (isNewInvoiceVoiceCommand(transcript)) {
       if (cartRef.current.length) {
         speakArabic("هناك منتجات في الفاتورة الحالية. احفظها أو أفرغ السلة أولًا.");
@@ -476,10 +516,10 @@ export function PosView({ role, userId, online }: PosViewProps) {
             <span className="rounded-full bg-[#e6f5ef] px-2.5 py-1 text-[10px] font-extrabold text-[#267a60]">{integer(cart.length)} أصناف</span>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button type="button" onClick={undoLastAction} disabled={!undoCount} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-[#dfe9e5] px-3 text-xs font-bold text-[#526c70] disabled:opacity-35" aria-label="التراجع عن آخر إضافة أو تعديل">
+            <button type="button" onClick={undoLastAction} disabled={!undoCount || checkoutBusy} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-[#dfe9e5] px-3 text-xs font-bold text-[#526c70] disabled:opacity-35" aria-label="التراجع عن آخر إضافة أو تعديل">
               <Undo2 size={15} /> تراجع
             </button>
-            <button type="button" onClick={clearCart} disabled={!cart.length} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-[#f0d8d8] px-3 text-xs font-bold text-[#ad5a59] disabled:opacity-35">
+            <button type="button" onClick={clearCart} disabled={!cart.length || checkoutBusy} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-[#f0d8d8] px-3 text-xs font-bold text-[#ad5a59] disabled:opacity-35">
               <Trash2 size={14} /> تفريغ الفاتورة
             </button>
           </div>
@@ -501,12 +541,12 @@ export function PosView({ role, userId, online }: PosViewProps) {
                   <div className="mono mt-0.5 text-[10px] text-[#91a2a3]">{item.barcode} · {money(item.price)} / {item.unit}</div>
                 </div>
                 <div className="flex items-center gap-1 rounded-xl bg-[#f1f6f4] p-1" aria-label={`الكمية ${integer(item.qty)} ${item.unit}`}>
-                  <button type="button" onClick={() => changeQuantity(item.id, 1)} className="flex h-9 w-9 items-center justify-center rounded-lg bg-white text-[#267a60] shadow-sm" aria-label={`زيادة كمية ${item.name}`}><Plus size={16} /></button>
+                  <button type="button" onClick={() => changeQuantity(item.id, 1)} disabled={checkoutBusy} className="flex h-9 w-9 items-center justify-center rounded-lg bg-white text-[#267a60] shadow-sm disabled:opacity-40" aria-label={`زيادة كمية ${item.name}`}><Plus size={16} /></button>
                   <span className="min-w-8 text-center text-xs font-extrabold text-[#3e5b60]">{integer(item.qty)}</span>
-                  <button type="button" onClick={() => changeQuantity(item.id, -1)} className="flex h-9 w-9 items-center justify-center rounded-lg bg-white text-[#526c70] shadow-sm" aria-label={`تقليل كمية ${item.name}`}><Minus size={16} /></button>
+                  <button type="button" onClick={() => changeQuantity(item.id, -1)} disabled={checkoutBusy} className="flex h-9 w-9 items-center justify-center rounded-lg bg-white text-[#526c70] shadow-sm disabled:opacity-40" aria-label={`تقليل كمية ${item.name}`}><Minus size={16} /></button>
                 </div>
                 <div className="col-start-2 text-xs font-extrabold text-[#24444c] sm:col-start-auto sm:w-28 sm:text-left">{money(item.price * item.qty)}</div>
-                <button type="button" onClick={() => removeItem(item.id)} aria-label={`حذف ${item.name}`} className="col-start-3 row-start-1 flex h-9 w-9 items-center justify-center rounded-lg text-[#aebcba] hover:bg-[#fff2ef] hover:text-[#bd4e51] sm:col-start-auto sm:row-auto"><Trash2 size={16} /></button>
+                <button type="button" onClick={() => removeItem(item.id)} disabled={checkoutBusy} aria-label={`حذف ${item.name}`} className="col-start-3 row-start-1 flex h-9 w-9 items-center justify-center rounded-lg text-[#aebcba] hover:bg-[#fff2ef] hover:text-[#bd4e51] disabled:opacity-40 sm:col-start-auto sm:row-auto"><Trash2 size={16} /></button>
                 <span className="sr-only">الصنف رقم {index + 1}</span>
               </article>
             ))}
@@ -526,10 +566,10 @@ export function PosView({ role, userId, online }: PosViewProps) {
             <button
               type="button"
               onClick={() => void submitInvoice()}
-              disabled={createInvoice.isPending || !cart.length || !online}
+              disabled={checkoutBusy || !cart.length || !online}
               className="flex min-h-12 items-center justify-center gap-2 rounded-xl bg-[#0f5d4d] px-5 text-sm font-extrabold text-white shadow-[0_10px_25px_rgba(15,93,77,0.17)] transition hover:bg-[#0b493c] disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {createInvoice.isPending ? <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> جارٍ حفظ الفاتورة...</> : <><Check size={17} /> حفظ الفاتورة <ChevronLeft size={17} /></>}
+              {checkoutBusy ? <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> جارٍ حفظ الفاتورة...</> : <><Check size={17} /> حفظ الفاتورة <ChevronLeft size={17} /></>}
             </button>
             {!online && <span className="text-center text-[10px] text-[#a83d42]">سيُتاح الحفظ بعد عودة الإنترنت</span>}
           </div>
