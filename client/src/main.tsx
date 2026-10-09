@@ -9,7 +9,11 @@ import App from "./App";
 import "./index.css";
 
 if ("serviceWorker" in navigator && (window.isSecureContext || window.location.hostname === "localhost")) {
-  window.addEventListener("load", () => { void navigator.serviceWorker.register("/sw.js"); });
+  window.addEventListener("load", () => {
+    void navigator.serviceWorker.register("/sw.js").catch(error => {
+      console.warn("[PWA] تعذر تسجيل العمل دون اتصال:", error);
+    });
+  });
 }
 
 const queryClient = new QueryClient();

@@ -4,6 +4,7 @@ import {
   buildGlobalProductRecord,
   createPriceChangeRequest,
   productKeyForBarcode,
+  projectStorePriceChangeRequests,
 } from "./catalog.logic.js";
 
 const product = buildGlobalProductRecord({
@@ -54,6 +55,37 @@ describe("global product catalog logic", () => {
       barcode: product.barcode,
     });
     expect(product.sellingPrice).toBe(5.5);
+  });
+
+  it("only returns safe request fields for the matching store", () => {
+    const rows = [
+      {
+        id: "pcr_9",
+        requestedByStoreId: "9",
+        requestedByName: "اسم لا يجب كشفه خارج الطلب الأصلي",
+        requestedByEmail: "private@example.test",
+        barcode: "6221",
+        productName: "منتج",
+        currentPrice: 5,
+        requestedPrice: 6,
+        status: "PENDING",
+        createdAt: "2026-10-02T00:00:00.000Z",
+      },
+      { id: "pcr_8", requestedByStoreId: 8, barcode: "other", status: "PENDING" },
+      null,
+    ];
+    const result = projectStorePriceChangeRequests(rows, 9);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      id: "pcr_9",
+      barcode: "6221",
+      currentPrice: 5,
+      requestedPrice: 6,
+      status: "PENDING",
+    });
+    expect(result[0]).not.toHaveProperty("requestedByName");
+    expect(result[0]).not.toHaveProperty("requestedByEmail");
+    expect(projectStorePriceChangeRequests(rows, 8).map(request => request.id)).toEqual(["pcr_8"]);
   });
 
   it("only applies a pending price change when the saved old price still matches", () => {

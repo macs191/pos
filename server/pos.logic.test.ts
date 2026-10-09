@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addProductToCart, cartSubtotal, invoiceTotal } from "../shared/pos.js";
+import { addProductToCart, cartSubtotal, invoiceTotal, pricesMatchAtSale } from "../shared/pos.js";
 import {
   buildInvoiceAnnouncement,
   isNewInvoiceVoiceCommand,
@@ -29,6 +29,13 @@ describe("POS cart logic", () => {
   it("keeps invoice totals non-negative after discounts", () => {
     expect(invoiceTotal(100, 20, 5)).toBe(85);
     expect(invoiceTotal(100, 120, 0)).toBe(0);
+  });
+
+  it("compares checkout prices at currency-cent precision", () => {
+    expect(pricesMatchAtSale(12.5, 12.5)).toBe(true);
+    expect(pricesMatchAtSale(12.501, 12.504)).toBe(true);
+    expect(pricesMatchAtSale(12.5, 12.51)).toBe(false);
+    expect(pricesMatchAtSale(Number.NaN, 12.5)).toBe(false);
   });
 
   it("builds a spoken Arabic invoice total announcement", () => {

@@ -27,6 +27,7 @@ import {
   listInvoices,
   listSubscriptionRequests,
   listPriceChangeRequests,
+  listPriceChangeRequestsForStore,
   listUsers,
   resolvePriceChangeRequest,
   resolveSubscriptionRequest,
@@ -123,6 +124,11 @@ function mapError(error: unknown): never {
       code: "BAD_REQUEST",
       message: "الكمية يجب أن تكون عددًا صحيحًا من القطع.",
     });
+  if (message.includes("PRODUCT_PRICE_CHANGED"))
+    throw new TRPCError({
+      code: "CONFLICT",
+      message: "تغير سعر منتج في الكتالوج منذ إضافته إلى السلة.",
+    });
   if (message.includes("NOT_FOUND") || message.includes("PRODUCT_NOT_FOUND"))
     throw new TRPCError({
       code: "NOT_FOUND",
@@ -211,6 +217,12 @@ export const appRouter = router({
           return mapError(error);
         }
       }),
+    myPriceChangeRequests: protectedProcedure.query(({ ctx }) => {
+      const supermarketId = getTenantIdFromUser(ctx.user);
+      return supermarketId === null
+        ? []
+        : listPriceChangeRequestsForStore(supermarketId);
+    }),
   }),
   pos: router({
     createInvoice: protectedProcedure
@@ -221,6 +233,7 @@ export const appRouter = router({
               z.object({
                 productId: z.string().min(1).max(120),
                 quantity: z.number().int().positive(),
+                expectedUnitPrice: z.number().finite().nonnegative().optional(),
               })
             )
             .min(1)

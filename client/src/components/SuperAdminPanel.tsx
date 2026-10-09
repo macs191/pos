@@ -6,12 +6,14 @@ import {
   Check,
   CreditCard,
   Edit3,
+  Filter,
   Loader2,
+  Search,
   ShieldCheck,
   Users,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
 const money = (value: number | string | null | undefined) =>
@@ -39,6 +41,67 @@ export function SuperAdminPanel() {
   const [editName, setEditName] = useState("");
   const [editPrice, setEditPrice] = useState("");
   const [requestDays, setRequestDays] = useState(30);
+  const [accountSearch, setAccountSearch] = useState("");
+  const [accountFilter, setAccountFilter] = useState<"ALL" | "PAID" | "UNPAID" | "ACTIVE" | "INACTIVE">("ALL");
+  const [productSearch, setProductSearch] = useState("");
+  const [productVisibility, setProductVisibility] = useState<"ALL" | "VISIBLE" | "HIDDEN">("ALL");
+  const [priceSearch, setPriceSearch] = useState("");
+  const [priceFilter, setPriceFilter] = useState("ALL");
+  const [subscriptionSearch, setSubscriptionSearch] = useState("");
+  const [subscriptionFilter, setSubscriptionFilter] = useState("ALL");
+  const [userSearch, setUserSearch] = useState("");
+
+  const filteredAccounts = useMemo(() => {
+    const query = accountSearch.trim().toLocaleLowerCase();
+    return (accounts.data ?? []).filter(Boolean).filter(({ store, access }: any) => {
+      const matchesText = !query || `${store.name ?? ""} ${store.id ?? ""} ${store.phone ?? ""}`.toLocaleLowerCase().includes(query);
+      const matchesFilter = accountFilter === "ALL" ||
+        (accountFilter === "PAID" && access?.isPaid === true) ||
+        (accountFilter === "UNPAID" && access?.isPaid !== true) ||
+        (accountFilter === "ACTIVE" && access?.isActive === true) ||
+        (accountFilter === "INACTIVE" && access?.isActive !== true);
+      return matchesText && matchesFilter;
+    });
+  }, [accounts.data, accountFilter, accountSearch]);
+
+  const filteredProducts = useMemo(() => {
+    const query = productSearch.trim().toLocaleLowerCase();
+    return (products.data ?? []).filter(Boolean).filter((product: any) => {
+      const matchesText = !query || `${product.name ?? ""} ${product.barcode ?? ""}`.toLocaleLowerCase().includes(query);
+      const matchesVisibility = productVisibility === "ALL" ||
+        (productVisibility === "HIDDEN" ? product.isActive === false : product.isActive !== false);
+      return matchesText && matchesVisibility;
+    });
+  }, [products.data, productSearch, productVisibility]);
+
+  const filteredPriceRequests = useMemo(() => {
+    const query = priceSearch.trim().toLocaleLowerCase();
+    return (requests.data ?? []).filter(Boolean)
+      .filter((request: any) => (priceFilter === "ALL" || request.status === priceFilter) &&
+        (!query || `${request.productName ?? ""} ${request.barcode ?? ""} ${request.requestedByStoreName ?? ""} ${request.requestedByName ?? ""}`.toLocaleLowerCase().includes(query)))
+      .sort((a: any, b: any) => {
+        const rank = (status: string) => status === "PENDING" ? 0 : status === "PROCESSING" ? 1 : 2;
+        return rank(a.status) - rank(b.status) || String(b.createdAt).localeCompare(String(a.createdAt));
+      });
+  }, [requests.data, priceFilter, priceSearch]);
+
+  const filteredSubscriptionRequests = useMemo(() => {
+    const query = subscriptionSearch.trim().toLocaleLowerCase();
+    return (subscriptionRequests.data ?? []).filter(Boolean)
+      .filter((request: any) => (subscriptionFilter === "ALL" || request.status === subscriptionFilter) &&
+        (!query || `${request.storeName ?? ""} ${request.supermarketId ?? ""} ${request.requestedByName ?? ""} ${request.requestedByEmail ?? ""}`.toLocaleLowerCase().includes(query)))
+      .sort((a: any, b: any) => {
+        const rank = (status: string) => status === "PENDING" ? 0 : status === "PROCESSING" ? 1 : 2;
+        return rank(a.status) - rank(b.status) || String(b.createdAt).localeCompare(String(a.createdAt));
+      });
+  }, [subscriptionRequests.data, subscriptionFilter, subscriptionSearch]);
+
+  const filteredUsers = useMemo(() => {
+    const query = userSearch.trim().toLocaleLowerCase();
+    return (users.data ?? []).filter(Boolean).filter((user: any) =>
+      !query || `${user.name ?? ""} ${user.email ?? ""} ${user.supermarketId ?? ""} ${user.role ?? ""}`.toLocaleLowerCase().includes(query)
+    );
+  }, [users.data, userSearch]);
 
   const refreshCatalog = () => {
     void products.refetch();
@@ -113,36 +176,43 @@ export function SuperAdminPanel() {
       label: "المتاجر",
       value: overview.data?.supermarkets,
       icon: <Building2 size={18} />,
+      filter: null,
     },
     {
       label: "المستخدمون",
       value: overview.data?.users,
       icon: <Users size={18} />,
+      filter: null,
     },
     {
       label: "المنتجات المشتركة",
       value: overview.data?.products,
       icon: <Boxes size={18} />,
+      filter: null,
     },
     {
       label: "إجمالي المبيعات",
       value: money(overview.data?.sales),
       icon: <BarChart3 size={18} />,
+      filter: null,
     },
     {
       label: "اشتراكات مدفوعة",
       value: overview.data?.paidSubscriptions,
       icon: <CreditCard size={18} />,
+      filter: "PAID" as const,
     },
     {
       label: "اشتراكات غير مدفوعة",
       value: overview.data?.unpaidSubscriptions,
       icon: <CreditCard size={18} />,
+      filter: "UNPAID" as const,
     },
     {
       label: "طلبات سعر معلقة",
       value: overview.data?.pendingPriceRequests,
       icon: <Edit3 size={18} />,
+      filter: null,
     },
   ];
 
@@ -195,9 +265,13 @@ export function SuperAdminPanel() {
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {cards.map(card => (
-          <div
+          <button
+            type="button"
             key={card.label}
-            className="soft-shadow rounded-2xl border border-[#e0e9e6] bg-white p-4"
+            disabled={!card.filter}
+            onClick={() => card.filter && setAccountFilter(card.filter)}
+            aria-pressed={card.filter ? accountFilter === card.filter : undefined}
+            className={`soft-shadow rounded-2xl border border-[#e0e9e6] bg-white p-4 text-right transition ${card.filter ? "cursor-pointer hover:border-[#82c6b0] hover:bg-[#fbfefd]" : "cursor-default"} ${card.filter && accountFilter === card.filter ? "ring-2 ring-[#0f6e58]/30" : ""}`}
           >
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#e8f4f0] text-[#267a60]">
               {card.icon}
@@ -208,7 +282,8 @@ export function SuperAdminPanel() {
             <div className="mt-1 text-[11px] font-semibold text-[#73888a]">
               {card.label}
             </div>
-          </div>
+            {card.filter && <div className="mt-2 text-[10px] font-bold text-[#287e64]">اضغط لتصفية المتاجر</div>}
+          </button>
         ))}
       </div>
 
@@ -228,11 +303,24 @@ export function SuperAdminPanel() {
             معلّق
           </span>
         </div>
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <label className="relative min-w-56 flex-1">
+            <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-[#93a3a3]" size={15} />
+            <input value={priceSearch} onChange={event => setPriceSearch(event.target.value)} placeholder="ابحث بالمنتج أو الباركود أو المتجر أو المستخدم" className="w-full rounded-xl border border-[#dfe9e5] bg-[#f8fbfa] py-2.5 pr-9 pl-3 text-xs outline-none focus:border-[#77bca8]" />
+          </label>
+          <label className="flex items-center gap-2 rounded-xl border border-[#dfe9e5] bg-white px-3 py-2 text-[10px] font-bold text-[#718688]">
+            <Filter size={14} />
+            <select aria-label="تصفية طلبات تغيير الأسعار حسب الحالة" value={priceFilter} onChange={event => setPriceFilter(event.target.value)} className="bg-transparent outline-none">
+              <option value="ALL">كل الحالات</option><option value="PENDING">قيد المراجعة</option><option value="PROCESSING">جارٍ المعالجة</option><option value="APPROVED">مقبول</option><option value="REJECTED">مرفوض</option>
+            </select>
+          </label>
+          <span className="text-[10px] text-[#829394]">{filteredPriceRequests.length} طلب</span>
+        </div>
         {requests.isLoading ? (
           <div className="p-8 text-center text-xs text-[#829394]">
             جارٍ تحميل الطلبات...
           </div>
-        ) : requests.data?.length ? (
+        ) : filteredPriceRequests.length ? (
           <div className="mt-4 overflow-x-auto">
             <table className="w-full text-right text-xs">
               <thead className="bg-[#f8fbfa] text-[10px] font-extrabold text-[#88999a]">
@@ -246,7 +334,7 @@ export function SuperAdminPanel() {
                 </tr>
               </thead>
               <tbody>
-                {requests.data.map(request => (
+                {filteredPriceRequests.map((request: any) => (
                   <tr key={request.id} className="border-t border-[#eef3f1]">
                     <td className="px-3 py-3">
                       <div className="font-extrabold text-[#34515a]">
@@ -272,10 +360,12 @@ export function SuperAdminPanel() {
                     </td>
                     <td className="px-3 py-3">
                       <span
-                        className={`rounded-full px-2 py-1 text-[10px] font-bold ${request.status === "PENDING" ? "bg-[#fff3cf] text-[#8b6500]" : request.status === "APPROVED" ? "bg-[#e7f6f0] text-[#2a8064]" : "bg-[#fce8e7] text-[#a83d42]"}`}
+                        className={`rounded-full px-2 py-1 text-[10px] font-bold ${request.status === "PENDING" || request.status === "PROCESSING" ? "bg-[#fff3cf] text-[#8b6500]" : request.status === "APPROVED" ? "bg-[#e7f6f0] text-[#2a8064]" : "bg-[#fce8e7] text-[#a83d42]"}`}
                       >
                         {request.status === "PENDING"
                           ? "قيد المراجعة"
+                          : request.status === "PROCESSING"
+                            ? "جارٍ المعالجة"
                           : request.status === "APPROVED"
                             ? "مقبول"
                             : "مرفوض"}
@@ -311,9 +401,13 @@ export function SuperAdminPanel() {
                             رفض
                           </button>
                         </div>
+                      ) : request.status === "PROCESSING" ? (
+                        <span className="text-[10px] font-bold text-[#8b6500]">جارٍ حفظ قرار المدير…</span>
                       ) : (
                         <span className="text-[10px] text-[#899b9b]">
-                          تمت المعالجة
+                          <span className="block font-bold">{request.status === "APPROVED" ? "اعتماد" : "رفض"}</span>
+                          <span className="mt-1 block">{request.reviewedAt ? new Date(request.reviewedAt).toLocaleString("ar-EG") : "وقت القرار غير متوفر"}</span>
+                          {request.reviewedByUserId ? <span className="mt-1 block">المدير #{request.reviewedByUserId}</span> : null}
                         </span>
                       )}
                     </td>
@@ -324,7 +418,7 @@ export function SuperAdminPanel() {
           </div>
         ) : (
           <div className="py-10 text-center text-xs text-[#829394]">
-            لا توجد طلبات تغيير أسعار.
+            لا توجد طلبات مطابقة لهذا البحث أو الفلتر.
           </div>
         )}
       </section>
@@ -394,11 +488,24 @@ export function SuperAdminPanel() {
             </div>
           </form>
         )}
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <label className="relative min-w-56 flex-1">
+            <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-[#93a3a3]" size={15} />
+            <input value={productSearch} onChange={event => setProductSearch(event.target.value)} placeholder="ابحث باسم المنتج أو الباركود" className="w-full rounded-xl border border-[#dfe9e5] bg-[#f8fbfa] py-2.5 pr-9 pl-3 text-xs outline-none focus:border-[#77bca8]" />
+          </label>
+          <label className="flex items-center gap-2 rounded-xl border border-[#dfe9e5] bg-white px-3 py-2 text-[10px] font-bold text-[#718688]">
+            <Filter size={14} />
+            <select aria-label="تصفية المنتجات حسب الظهور" value={productVisibility} onChange={event => setProductVisibility(event.target.value as "ALL" | "VISIBLE" | "HIDDEN")} className="bg-transparent outline-none">
+              <option value="ALL">كل المنتجات</option><option value="VISIBLE">الظاهرة</option><option value="HIDDEN">المخفية</option>
+            </select>
+          </label>
+          <span className="text-[10px] text-[#829394]">{filteredProducts.length} منتج</span>
+        </div>
         {products.isLoading ? (
           <div className="p-8 text-center text-xs text-[#829394]">
             جارٍ تحميل المنتجات...
           </div>
-        ) : products.data?.length ? (
+        ) : filteredProducts.length ? (
           <div className="mt-4 overflow-x-auto">
             <table className="w-full text-right text-xs">
               <thead className="bg-[#f8fbfa] text-[10px] font-extrabold text-[#88999a]">
@@ -411,7 +518,7 @@ export function SuperAdminPanel() {
                 </tr>
               </thead>
               <tbody>
-                {products.data.map(product => (
+                {filteredProducts.map((product: any) => (
                   <tr key={product.id} className="border-t border-[#eef3f1]">
                     <td className="px-3 py-3 font-extrabold text-[#34515a]">
                       {product.name}
@@ -459,7 +566,7 @@ export function SuperAdminPanel() {
           </div>
         ) : (
           <div className="py-8 text-center text-xs text-[#829394]">
-            لا توجد منتجات في الكتالوج.
+            لا توجد منتجات مطابقة لهذا البحث أو الفلتر.
           </div>
         )}
       </section>
@@ -469,26 +576,41 @@ export function SuperAdminPanel() {
           <div>
             <h3 className="font-extrabold text-[#29464e]">اشتراكات المتاجر</h3>
             <p className="mt-1 text-[11px] text-[#8a9c9c]">
-              تمديد الاشتراك وتغيير حالة الدفع يدويًا
+              إدارة الوصول والمدة مستقلة عن تأكيد الدفع اليدوي
             </p>
           </div>
           <span className="rounded-full bg-[#e8f4f0] px-3 py-1 text-[10px] font-bold text-[#267a60]">
             تجربة أولية 15 يومًا
           </span>
         </div>
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <label className="relative min-w-56 flex-1">
+            <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-[#93a3a3]" size={15} />
+            <input value={accountSearch} onChange={event => setAccountSearch(event.target.value)} placeholder="ابحث باسم المتجر أو رقمه أو هاتفه" className="w-full rounded-xl border border-[#dfe9e5] bg-[#f8fbfa] py-2.5 pr-9 pl-3 text-xs outline-none focus:border-[#77bca8]" />
+          </label>
+          <label className="flex items-center gap-2 rounded-xl border border-[#dfe9e5] bg-white px-3 py-2 text-[10px] font-bold text-[#718688]">
+            <Filter size={14} />
+            <select aria-label="تصفية المتاجر حسب الدفع أو صلاحية الاشتراك" value={accountFilter} onChange={event => setAccountFilter(event.target.value as typeof accountFilter)} className="bg-transparent outline-none">
+              <option value="ALL">كل المتاجر</option><option value="PAID">مدفوع</option><option value="UNPAID">غير مدفوع</option><option value="ACTIVE">وصول نشط</option><option value="INACTIVE">وصول غير نشط</option>
+            </select>
+          </label>
+          <span className="text-[10px] text-[#829394]">{filteredAccounts.length} متجر</span>
+        </div>
         <div className="mt-4 overflow-x-auto">
           <table className="w-full text-right text-xs">
             <thead className="bg-[#f8fbfa] text-[10px] font-extrabold text-[#88999a]">
               <tr>
                 <th className="px-3 py-3">المتجر</th>
-                <th className="px-3 py-3">الوصول</th>
-                <th className="px-3 py-3">الدفع</th>
+                <th className="px-3 py-3">حالة الوصول</th>
+                <th className="px-3 py-3">تأكيد الدفع</th>
                 <th className="px-3 py-3">ينتهي في</th>
                 <th className="px-3 py-3">إدارة الاشتراك</th>
               </tr>
             </thead>
             <tbody>
-              {accounts.data?.filter(Boolean).map(({ store, access }) => (
+              {filteredAccounts.length === 0 ? (
+                <tr><td colSpan={5} className="px-3 py-8 text-center text-xs text-[#829394]">لا توجد متاجر مطابقة لهذا البحث أو الفلتر.</td></tr>
+              ) : filteredAccounts.map(({ store, access }: any) => (
                 <tr key={store.id} className="border-t border-[#eef3f1]">
                   <td className="px-3 py-3 font-extrabold text-[#34515a]">
                     {store.name}
@@ -499,8 +621,8 @@ export function SuperAdminPanel() {
                         نشط
                       </span>
                     ) : (
-                      <span className="rounded-full bg-[#fce8e7] px-2 py-1 text-[10px] font-bold text-[#a83d42]">
-                        منتهي/موقوف
+                      <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${access?.subscription?.status === "PAUSED" ? "bg-[#fff3cf] text-[#8b6500]" : "bg-[#fce8e7] text-[#a83d42]"}`}>
+                        {access?.subscription?.status === "PAUSED" ? "موقوف" : access?.subscription ? "منتهي" : "غير مفعّل"}
                       </span>
                     )}
                   </td>
@@ -535,7 +657,6 @@ export function SuperAdminPanel() {
                               ) +
                                 30 * 86400000
                             ),
-                            isPaid: false,
                           })
                         }
                         className="rounded-lg bg-[#e7f5f0] px-2 py-1.5 text-[10px] font-bold text-[#267a60]"
@@ -551,6 +672,7 @@ export function SuperAdminPanel() {
                       </button>
                       <button
                         type="button"
+                        disabled={!access?.isActive && !(access?.subscription?.status === "PAUSED" && access?.effectiveEnd && new Date(access.effectiveEnd).getTime() > Date.now())}
                         onClick={() =>
                           setSubscription.mutate({
                             supermarketId: store.id,
@@ -563,11 +685,11 @@ export function SuperAdminPanel() {
                               : null,
                           })
                         }
-                        className="rounded-lg border border-[#f0d8d8] px-2 py-1.5 text-[10px] font-bold text-[#a83d42]"
+                        className="rounded-lg border border-[#f0d8d8] px-2 py-1.5 text-[10px] font-bold text-[#a83d42] disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        {access?.subscription?.status === "PAUSED"
-                          ? "تفعيل"
-                          : "إيقاف"}
+                      {access?.subscription?.status === "PAUSED"
+                        ? "تفعيل"
+                          : access?.isActive ? "إيقاف مؤقت" : "انتهى — استخدم التمديد"}
                       </button>
                     </div>
                   </td>
@@ -603,11 +725,24 @@ export function SuperAdminPanel() {
             />
           </label>
         </div>
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <label className="relative min-w-56 flex-1">
+            <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-[#93a3a3]" size={15} />
+            <input value={subscriptionSearch} onChange={event => setSubscriptionSearch(event.target.value)} placeholder="ابحث بالمتجر أو مقدم الطلب أو البريد" className="w-full rounded-xl border border-[#dfe9e5] bg-[#f8fbfa] py-2.5 pr-9 pl-3 text-xs outline-none focus:border-[#77bca8]" />
+          </label>
+          <label className="flex items-center gap-2 rounded-xl border border-[#dfe9e5] bg-white px-3 py-2 text-[10px] font-bold text-[#718688]">
+            <Filter size={14} />
+            <select aria-label="تصفية طلبات الاشتراك حسب الحالة" value={subscriptionFilter} onChange={event => setSubscriptionFilter(event.target.value)} className="bg-transparent outline-none">
+              <option value="ALL">كل الحالات</option><option value="PENDING">قيد المراجعة</option><option value="PROCESSING">جارٍ المعالجة</option><option value="APPROVED">تمت الموافقة</option><option value="REJECTED">مرفوض</option>
+            </select>
+          </label>
+          <span className="text-[10px] text-[#829394]">{filteredSubscriptionRequests.length} طلب</span>
+        </div>
         {subscriptionRequests.isLoading ? (
           <div className="py-8 text-center text-xs text-[#829394]">
             جارٍ تحميل طلبات الاشتراك...
           </div>
-        ) : subscriptionRequests.data?.filter(Boolean).length ? (
+        ) : filteredSubscriptionRequests.length ? (
           <div className="mt-4 overflow-x-auto">
             <table className="w-full text-right text-xs">
               <thead className="bg-[#f8fbfa] text-[10px] font-extrabold text-[#88999a]">
@@ -621,7 +756,7 @@ export function SuperAdminPanel() {
                 </tr>
               </thead>
               <tbody>
-                {subscriptionRequests.data?.filter(Boolean).map(request => (
+                {filteredSubscriptionRequests.map((request: any) => (
                   <tr key={request.id} className="border-t border-[#eef3f1]">
                     <td className="px-3 py-3 font-extrabold text-[#34515a]">
                       {request.storeName || `متجر #${request.supermarketId}`}
@@ -683,9 +818,7 @@ export function SuperAdminPanel() {
                           {request.grantedDays
                             ? `تمديد ${request.grantedDays} يومًا`
                             : request.reviewedAt
-                              ? new Date(request.reviewedAt).toLocaleDateString(
-                                  "ar-EG"
-                                )
+                              ? `قرار ${new Date(request.reviewedAt).toLocaleDateString("ar-EG")}${request.reviewedByUserId ? ` · المدير #${request.reviewedByUserId}` : ""}`
                               : "—"}
                         </span>
                       )}
@@ -697,7 +830,7 @@ export function SuperAdminPanel() {
           </div>
         ) : (
           <div className="py-8 text-center text-xs text-[#829394]">
-            لا توجد طلبات اشتراك حتى الآن.
+            لا توجد طلبات اشتراك مطابقة لهذا البحث أو الفلتر.
           </div>
         )}
       </section>
@@ -711,6 +844,13 @@ export function SuperAdminPanel() {
             تعيين الدور أو تعطيل الحساب من لوحة المنصة
           </p>
         </div>
+        <div className="mt-4 flex items-center gap-2">
+          <label className="relative min-w-56 flex-1">
+            <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-[#93a3a3]" size={15} />
+            <input value={userSearch} onChange={event => setUserSearch(event.target.value)} placeholder="ابحث بالاسم أو البريد أو رقم المتجر أو الدور" className="w-full rounded-xl border border-[#dfe9e5] bg-[#f8fbfa] py-2.5 pr-9 pl-3 text-xs outline-none focus:border-[#77bca8]" />
+          </label>
+          <span className="text-[10px] text-[#829394]">{filteredUsers.length} مستخدم</span>
+        </div>
         <div className="mt-4 overflow-x-auto">
           <table className="w-full text-right text-xs">
             <thead className="bg-[#f8fbfa] text-[10px] font-extrabold text-[#88999a]">
@@ -723,7 +863,9 @@ export function SuperAdminPanel() {
               </tr>
             </thead>
             <tbody>
-              {users.data?.filter(Boolean).map(user => (
+              {filteredUsers.length === 0 ? (
+                <tr><td colSpan={5} className="px-3 py-8 text-center text-xs text-[#829394]">لا يوجد مستخدم يطابق هذا البحث.</td></tr>
+              ) : filteredUsers.map((user: any) => (
                 <tr key={user.id} className="border-t border-[#eef3f1]">
                   <td className="px-3 py-3">
                     <div className="font-extrabold text-[#34515a]">

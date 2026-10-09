@@ -93,6 +93,35 @@ export function createPriceChangeRequest(input: {
   };
 }
 
+export function projectStorePriceChangeRequests(
+  requests: unknown[],
+  supermarketId: number
+) {
+  const validStatuses = new Set(["PENDING", "PROCESSING", "APPROVED", "REJECTED"]);
+  return requests
+    .filter((value): value is Record<string, unknown> => {
+      if (!value || typeof value !== "object") return false;
+      const row = value as Record<string, unknown>;
+      return Number(row.requestedByStoreId) === supermarketId && validStatuses.has(String(row.status));
+    })
+    .sort((a, b) => String((b as Record<string, unknown>).createdAt ?? "").localeCompare(String((a as Record<string, unknown>).createdAt ?? "")))
+    .slice(0, 100)
+    .map(value => {
+      const row = value as Record<string, unknown>;
+      return {
+        id: String(row.id ?? ""),
+        barcode: String(row.barcode ?? ""),
+        productName: String(row.productName ?? ""),
+        currentPrice: Number(row.currentPrice ?? 0),
+        requestedPrice: Number(row.requestedPrice ?? 0),
+        status: String(row.status),
+        createdAt: String(row.createdAt ?? ""),
+        reviewedAt: row.reviewedAt ? String(row.reviewedAt) : null,
+      };
+    })
+    .filter(row => row.id.length > 0 && row.barcode.length > 0 && Number.isFinite(row.currentPrice) && Number.isFinite(row.requestedPrice));
+}
+
 export function applyApprovedPriceChange<
   T extends { sellingPrice: number | string },
 >(

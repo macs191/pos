@@ -37,6 +37,16 @@ export function GlobalProductsView() {
   const [voiceField, setVoiceField] = useState<"name" | "price" | null>(null);
   const input = useMemo(() => ({ search }), [search]);
   const products = trpc.products.list.useQuery(input, { retry: false });
+  const myPriceRequests = trpc.products.myPriceChangeRequests.useQuery(undefined, { retry: false });
+  const [recentlyAddedBarcode, setRecentlyAddedBarcode] = useState<string | null>(null);
+  const latestPriceRequestByBarcode = useMemo(() => {
+    const latest = new Map<string, NonNullable<typeof myPriceRequests.data>[number]>();
+    for (const request of myPriceRequests.data ?? []) {
+      if (!request?.barcode || latest.has(request.barcode)) continue;
+      latest.set(request.barcode, request);
+    }
+    return latest;
+  }, [myPriceRequests.data]);
 
   const closeDialog = () => {
     setDialogMode(null);
@@ -96,6 +106,8 @@ export function GlobalProductsView() {
       toast.success(
         "تمت إضافة المنتج إلى الكتالوج العام، وأصبح متاحًا لجميع المتاجر."
       );
+      setRecentlyAddedBarcode(barcode);
+      window.setTimeout(() => setRecentlyAddedBarcode(current => current === barcode ? null : current), 10000);
       void products.refetch();
       finishCurrentFlow();
     },
@@ -108,6 +120,7 @@ export function GlobalProductsView() {
   const requestPrice = trpc.products.requestPriceChange.useMutation({
     onSuccess: () => {
       toast.success("أُرسل طلب تغيير السعر إلى مدير المنصة للموافقة.");
+      void myPriceRequests.refetch();
       finishCurrentFlow();
     },
     onError: error => toast.error(error.message),
@@ -213,6 +226,7 @@ export function GlobalProductsView() {
   };
 
   const currentPrice = Number(lookup.data?.sellingPrice ?? 0);
+  const currentPriceRequest = latestPriceRequestByBarcode.get(barcode);
   const saving = createProduct.isPending || requestPrice.isPending;
 
   return (
@@ -229,7 +243,7 @@ export function GlobalProductsView() {
               المنتجات والأسعار العامة
             </h2>
             <p className="mt-2 max-w-xl text-xs leading-6 text-[#bfd2d2]">
-              امسح الباركود بالكاميرا الأمامية أو أدخله يدويًا، ثم اكتب أو
+              امسح الباركود بالكاميرا الخلفية افتراضيًا (مع إمكانية التبديل للأمامية) أو أدخله يدويًا، ثم اكتب أو
               استخدم الإملاء الصوتي لاسم المنتج وسعره. طلبات تغيير الأسعار تظل
               بانتظار موافقة المدير.
             </p>
@@ -294,11 +308,22 @@ export function GlobalProductsView() {
                   <th className="px-5 py-3">المنتج</th>
                   <th className="px-5 py-3">الباركود</th>
                   <th className="px-5 py-3">السعر العام</th>
-                  <th className="px-5 py-3">نوع المنتج</th>
+                  <th className="px-5 py-3">حالة السعر</th>
                 </tr>
               </thead>
               <tbody>
-                {products.data.map(product => (
+                {products.data.map(product => {
+                  const request = latestPriceRequestByBarcode.get(product.barcode);
+                  const status = recentlyAddedBarcode === product.barcode
+                    ? { label: "أُضيف الآن · مشترك", style: "bg-[#e7f6f0] text-[#2a8064]" }
+                    : request?.status === "PENDING" || request?.status === "PROCESSING"
+                      ? { label: "طلبك قيد المراجعة", style: "bg-[#fff3cf] text-[#8b6500]" }
+                      : request?.status === "APPROVED"
+                        ? { label: "اعتمد المدير السعر", style: "bg-[#e7f6f0] text-[#2a8064]" }
+                        : request?.status === "REJECTED"
+                          ? { label: "رُفض آخر مقترح", style: "bg-[#fce8e7] text-[#a83d42]" }
+                          : { label: "سعر عام", style: "bg-[#eff4f2] text-[#526c70]" };
+                  return (
                   <tr
                     key={product.id}
                     className="border-t border-[#eef3f1] text-xs"
@@ -313,12 +338,19 @@ export function GlobalProductsView() {
                       {money(product.sellingPrice)}
                     </td>
                     <td className="px-5 py-3">
-                      <span className="rounded-full bg-[#e7f6f0] px-2 py-1 text-[10px] font-bold text-[#2a8064]">
-                        قطعة · مشترك
+                      <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${status.style}`}>
+                        {status.label}
                       </span>
+                      {request?.status === "PENDING" && (
+                        <div className="mt-1 text-[10px] text-[#8a7a4b]">مقترح: {money(request.requestedPrice)}</div>
+                      )}
+                      {request?.reviewedAt && (request.status === "APPROVED" || request.status === "REJECTED") && (
+                        <div className="mt-1 text-[10px] text-[#93a3a3]">{new Date(request.reviewedAt).toLocaleDateString("ar-EG")}</div>
+                      )}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -527,6 +559,15 @@ export function GlobalProductsView() {
                     السعر الحالي: {money(currentPrice)}
                   </div>
                 </div>
+                {currentPriceRequest && (
+                  <div className={`rounded-xl px-3 py-2 text-[11px] leading-5 ${currentPriceRequest.status === "PENDING" || currentPriceRequest.status === "PROCESSING" ? "border border-[#f0dca6] bg-[#fff8e7] text-[#8c690f]" : currentPriceRequest.status === "APPROVED" ? "border border-[#cfe4dc] bg-[#f0faf5] text-[#235d4b]" : "border border-[#f0d8d8] bg-[#fff2ef] text-[#8d3d40]"}`}>
+                    {currentPriceRequest.status === "PENDING" || currentPriceRequest.status === "PROCESSING"
+                      ? `طلب تغيير السعر الذي أرسله متجرك قيد المراجعة. السعر المقترح ${money(currentPriceRequest.requestedPrice)}.`
+                      : currentPriceRequest.status === "APPROVED"
+                        ? `اعتمد المدير آخر طلب لمتجرك بتاريخ ${currentPriceRequest.reviewedAt ? new Date(currentPriceRequest.reviewedAt).toLocaleDateString("ar-EG") : "غير محدد"}.`
+                        : `رُفض آخر طلب سعر لمتجرك بتاريخ ${currentPriceRequest.reviewedAt ? new Date(currentPriceRequest.reviewedAt).toLocaleDateString("ar-EG") : "غير محدد"}. يمكنك إرسال مقترح جديد.`}
+                  </div>
+                )}
                 <div className="space-y-2 rounded-2xl border border-[#cfe4dc] bg-[#f4faf7] p-3">
                   <p className="text-[10px] leading-5 text-[#6f8982]">
                     استخدم الصوت لنطق السعر المقترح أو لإنهاء المسح صوتيًا.
@@ -585,6 +626,7 @@ export function GlobalProductsView() {
                   </form>
                 ) : (
                   <div className="flex flex-col gap-2">
+                    {currentPriceRequest?.status === "PENDING" || currentPriceRequest?.status === "PROCESSING" ? null : (
                     <button
                       type="button"
                       onClick={() => {
@@ -596,6 +638,7 @@ export function GlobalProductsView() {
                     >
                       هل تغير سعر المنتج؟ اقترح سعرًا جديدًا
                     </button>
+                    )}
                     <button
                       type="button"
                       onClick={cancelDialog}

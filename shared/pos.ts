@@ -42,6 +42,12 @@ export function cartSubtotal(cart: PosCartLine[]): number {
   return cart.reduce((sum, line) => sum + line.price * line.qty, 0);
 }
 
+export function pricesMatchAtSale(expectedPrice: number, catalogPrice: number): boolean {
+  return Number.isFinite(expectedPrice) &&
+    Number.isFinite(catalogPrice) &&
+    Math.round(expectedPrice * 100) === Math.round(catalogPrice * 100);
+}
+
 export function invoiceTotal(subtotal: number, discount = 0, tax = 0): number {
   return Math.max(0, subtotal - discount + tax);
 }

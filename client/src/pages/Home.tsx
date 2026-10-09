@@ -1,17 +1,8 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
-import { addProductToCart, cartSubtotal } from "@shared/pos";
-import {
-  buildInvoiceAnnouncement,
-  isNewInvoiceVoiceCommand,
-  isSaveVoiceCommand,
-  parseVoiceProductPhrase,
-} from "@shared/voice";
-import { BarcodeCameraScanner } from "@/components/BarcodeCameraScanner";
-import {
-  VoiceCommandButton,
-  speakArabic,
-} from "@/components/VoiceCommandButton";
+import { PosView } from "@/components/PosView";
+import { PwaInstallButton } from "@/components/PwaInstallButton";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { GlobalProductsView } from "@/components/GlobalProductsView";
 import { SuperAdminPanel } from "@/components/SuperAdminPanel";
 import {
@@ -63,15 +54,6 @@ import {
 } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
-
-type CartLine = {
-  id: string;
-  name: string;
-  barcode: string;
-  price: number;
-  qty: number;
-  unit: string;
-};
 
 type NavItem = {
   path: string;
@@ -222,12 +204,15 @@ function PublicWelcome({
               <div className="text-xs text-[#9ab3b6]">نظام تشغيل متجرك</div>
             </div>
           </div>
-          <button
-            onClick={openLogin}
-            className="rounded-xl border border-[#3b5964] px-4 py-2 text-sm font-bold text-[#d7e9e4] hover:bg-[#123245]"
-          >
-            {loading ? "جارٍ التحميل" : "تسجيل الدخول"}
-          </button>
+          <div className="flex items-center gap-2">
+            <PwaInstallButton />
+            <button
+              onClick={openLogin}
+              className="rounded-xl border border-[#3b5964] px-4 py-2 text-sm font-bold text-[#d7e9e4] hover:bg-[#123245]"
+            >
+              {loading ? "جارٍ التحميل" : "تسجيل الدخول"}
+            </button>
+          </div>
         </header>
         <main className="grid flex-1 items-center gap-12 py-16 lg:grid-cols-[1.05fr_0.95fr]">
           <section>
@@ -591,11 +576,13 @@ function Header({
   subtitle,
   navigate,
   onLogout,
+  online,
 }: {
   title: string;
   subtitle: string;
   navigate: (path: string) => void;
   onLogout: () => void;
+  online: boolean;
 }) {
   return (
     <header className="sticky top-0 z-20 flex h-[76px] items-center justify-between border-b border-[#dfe9e5] bg-[#f2f6f4]/95 px-4 backdrop-blur sm:px-8">
@@ -618,10 +605,12 @@ function Header({
       <div className="flex items-center gap-2 sm:gap-3">
         <div className="hidden text-left sm:block">
           <div className="text-xs font-bold text-[#4d656a]">{today()}</div>
-          <div className="mt-0.5 text-[10px] text-[#92a1a2]">
-            آخر مزامنة منذ لحظات
+          <div className={`mt-0.5 flex items-center gap-1 text-[10px] ${online ? "text-[#2a8064]" : "text-[#a83d42]"}`}>
+            <span className={`h-1.5 w-1.5 rounded-full ${online ? "bg-[#3aa580]" : "bg-[#bd4448]"}`} />
+            {online ? "اتصال الشبكة متاح" : "لا يوجد اتصال بالإنترنت"}
           </div>
         </div>
+        <PwaInstallButton />
         <IconButton label="الإشعارات">
           <Bell size={18} />
         </IconButton>
@@ -654,441 +643,6 @@ function EmptyState({
       <div className="mt-2 max-w-sm text-xs leading-6 text-[#7b8d8e]">
         {body}
       </div>
-    </div>
-  );
-}
-
-function PosView({ role, userId }: { role: string; userId: number }) {
-  const [cart, setCart] = useState<CartLine[]>([]);
-  const [barcode, setBarcode] = useState("");
-  const [scanStatus, setScanStatus] = useState("بانتظار المسح التالي");
-  const [cameraOpen, setCameraOpen] = useState(true);
-  const scanInputRef = useRef<HTMLInputElement>(null);
-  const queueRef = useRef<string[]>([]);
-  const processingRef = useRef(false);
-  const lookup = trpc.products.lookupByBarcode.useMutation();
-  const voiceLookup = trpc.products.lookupByName.useMutation();
-  const createInvoice = trpc.pos.createInvoice.useMutation();
-  const [voiceInvoiceMode, setVoiceInvoiceMode] = useState(false);
-  const [pendingVoiceName, setPendingVoiceName] = useState<string | null>(null);
-  const canPay = [
-    "OWNER",
-    "ADMIN",
-    "MANAGER",
-    "CASHIER",
-    "SUPER_ADMIN",
-  ].includes(role);
-  const total = cartSubtotal(cart);
-
-  useEffect(() => {
-    const focus = () => scanInputRef.current?.focus();
-    focus();
-    window.addEventListener("focus", focus);
-    return () => window.removeEventListener("focus", focus);
-  }, []);
-
-  const drainQueue = useCallback(async () => {
-    if (processingRef.current) return;
-    processingRef.current = true;
-    setScanStatus("جاري إضافة المنتجات...");
-    while (queueRef.current.length > 0) {
-      const nextBarcode = queueRef.current.shift();
-      if (!nextBarcode) continue;
-      try {
-        const product = await lookup.mutateAsync({ barcode: nextBarcode });
-        setCart(current => addProductToCart(current, product));
-        setScanStatus(`تمت إضافة ${product.name}`);
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : "المنتج غير موجود.";
-        toast.error(
-          message.includes("المنتج") ? message : "المنتج غير موجود.",
-          { description: `الباركود: ${nextBarcode}` }
-        );
-        setScanStatus("لم يتم العثور على المنتج — جاهز للمسح التالي");
-      } finally {
-        setBarcode("");
-        requestAnimationFrame(() => scanInputRef.current?.focus());
-      }
-    }
-    processingRef.current = false;
-    setScanStatus("جاهز للمسح التالي");
-  }, [lookup]);
-
-  const onBarcodeKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.key !== "Enter") return;
-    event.preventDefault();
-    const value = barcode.trim();
-    if (!value) return;
-    queueRef.current.push(value);
-    setBarcode("");
-    void drainQueue();
-  };
-
-  const removeItem = (id: string) =>
-    setCart(current => current.filter(item => item.id !== id));
-  const clearCart = () => {
-    setCart([]);
-    setBarcode("");
-    setScanStatus("جاهز للمسح التالي");
-    requestAnimationFrame(() => scanInputRef.current?.focus());
-  };
-  const submitInvoice = async () => {
-    if (!cart.length) {
-      toast.error("أضف منتجًا واحدًا على الأقل إلى السلة.");
-      return;
-    }
-    if (!canPay) {
-      toast.error("لا تملك صلاحية إنشاء فاتورة.");
-      return;
-    }
-    try {
-      const result = await createInvoice.mutateAsync({
-        items: cart.map(item => ({ productId: item.id, quantity: item.qty })),
-        discount: 0,
-        tax: 0,
-        paymentMethod: "CASH",
-      });
-      announceInvoiceTotal(result.total);
-      toast.success("تم حفظ الفاتورة بنجاح", {
-        description: `${result.invoiceNumber} · ${money(result.total)}`,
-      });
-      clearCart();
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "تعذر حفظ الفاتورة."
-      );
-      requestAnimationFrame(() => scanInputRef.current?.focus());
-    }
-  };
-
-  const announceInvoiceTotal = (invoiceTotal: number) => {
-    if (
-      typeof window === "undefined" ||
-      !("speechSynthesis" in window) ||
-      !("SpeechSynthesisUtterance" in window)
-    ) {
-      setScanStatus(`تم حفظ الفاتورة · الإجمالي ${money(invoiceTotal)}`);
-      return;
-    }
-    window.speechSynthesis.cancel();
-    const announcement = new SpeechSynthesisUtterance(
-      buildInvoiceAnnouncement(invoiceTotal)
-    );
-    announcement.lang = "ar-EG";
-    announcement.rate = 0.88;
-    announcement.pitch = 1;
-    announcement.volume = 1;
-    window.speechSynthesis.speak(announcement);
-    setScanStatus(`تم حفظ الفاتورة · الإجمالي ${money(invoiceTotal)}`);
-  };
-
-  const handleCameraDetected = useCallback(
-    (value: string) => {
-      setBarcode("");
-      queueRef.current.push(value);
-      void drainQueue();
-    },
-    [drainQueue]
-  );
-
-  const handleVoiceCommand = useCallback(
-    async (transcript: string) => {
-      if (isNewInvoiceVoiceCommand(transcript)) {
-        clearCart();
-        setVoiceInvoiceMode(true);
-        setPendingVoiceName(null);
-        speakArabic(
-          "تم فتح فاتورة جديدة. قل اسم المنتج، ويمكنك ذكر السعر والكمية."
-        );
-        return;
-      }
-      if (isSaveVoiceCommand(transcript) && voiceInvoiceMode) {
-        await submitInvoice();
-        setVoiceInvoiceMode(false);
-        return;
-      }
-      const phrase = parseVoiceProductPhrase(transcript);
-      const spokenName = pendingVoiceName ?? phrase.name;
-      if (
-        !spokenName ||
-        spokenName.length < 2 ||
-        /^(خمسة|عشرة|واحد|اثنين|ثلاثة|أربعة|اربعة|ستة|سبعة|ثمانية|تسعة)$/i.test(
-          spokenName
-        )
-      ) {
-        speakArabic("قل اسم المنتج، مثل مياه معدنية بخمسة جنيه.");
-        return;
-      }
-      setPendingVoiceName(null);
-      try {
-        const matches = await voiceLookup.mutateAsync({ name: spokenName });
-        if (matches.length === 0) {
-          speakArabic(
-            `لم أجد منتج ${spokenName}. أضفه أولًا من شاشة المنتجات بالباركود.`
-          );
-          return;
-        }
-        if (matches.length > 1) {
-          speakArabic(
-            "وجدت أكثر من منتج بهذا الاسم. استخدم الباركود أو قل الاسم بشكل أدق."
-          );
-          return;
-        }
-        const product = matches[0];
-        for (let index = 0; index < phrase.quantity; index += 1)
-          setCart(current => addProductToCart(current, product));
-        setVoiceInvoiceMode(true);
-        speakArabic(
-          `تمت إضافة ${product.name}، الكمية ${phrase.quantity}. قل منتجًا آخر أو قل احفظ.`
-        );
-      } catch (error) {
-        toast.error(
-          error instanceof Error
-            ? error.message
-            : "تعذر البحث عن المنتج بالصوت."
-        );
-      }
-    },
-    [clearCart, pendingVoiceName, submitInvoice, voiceInvoiceMode, voiceLookup]
-  );
-
-  return (
-    <div className="space-y-5">
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.38fr)_minmax(340px,0.62fr)]">
-        <section className="soft-shadow overflow-hidden rounded-2xl border border-[#d9e6e0] bg-white">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e5edeb] px-5 py-4">
-            <div>
-              <div className="flex items-center gap-2">
-                <div className="h-2.5 w-2.5 animate-pulse rounded-full bg-[#36a77f]" />
-                <h2 className="font-extrabold text-[#183741]">ماسح الباركود</h2>
-              </div>
-              <p className="mt-1 text-[11px] font-semibold text-[#809194]">
-                امسح المنتجات بالتتابع دون لمس الشاشة
-              </p>
-            </div>
-            <div className="flex items-center gap-2 rounded-lg bg-[#edf7f3] px-2.5 py-1.5 text-[10px] font-extrabold text-[#20765d]">
-              <Zap size={13} /> معالجة فورية · {queueRef.current.length} في
-              الانتظار
-            </div>
-          </div>
-          <div className="relative bg-[#f8fcfa] p-5 sm:p-8">
-            <div className="absolute inset-0 dot-grid" />
-            <div className="relative">
-              <div className="flex items-center justify-between gap-3">
-                <label htmlFor="barcode" className="label-caps">
-                  Barcode input · جاهز
-                </label>
-                <button
-                  onClick={() => setCameraOpen(true)}
-                  className="flex items-center gap-2 rounded-lg bg-[#0f5d4d] px-3 py-2 text-[11px] font-extrabold text-white hover:bg-[#0b493c]"
-                >
-                  <Camera size={15} /> فتح الكاميرا
-                </button>
-              </div>
-              <div className="mt-2 flex items-center gap-3 rounded-2xl border-2 border-[#54b393] bg-white px-4 py-4 shadow-[0_0_0_4px_rgba(84,179,147,0.1)]">
-                <Search size={21} className="shrink-0 text-[#2e9a77]" />
-                <input
-                  id="barcode"
-                  ref={scanInputRef}
-                  autoFocus
-                  value={barcode}
-                  onChange={event => setBarcode(event.target.value)}
-                  onKeyDown={onBarcodeKeyDown}
-                  placeholder="امسح الباركود هنا ثم اضغط Enter"
-                  className="mono min-w-0 flex-1 bg-transparent text-base font-semibold text-[#19383e] outline-none placeholder:font-sans placeholder:text-sm placeholder:text-[#a5b5b2]"
-                />
-                <kbd className="hidden rounded-md border border-[#dce8e3] bg-[#f3f8f6] px-2 py-1 text-[10px] font-bold text-[#718784] sm:inline">
-                  ENTER
-                </kbd>
-              </div>
-              <div className="mt-3 flex items-center gap-2 text-[11px] font-semibold text-[#66807b]">
-                <Activity size={14} className="text-[#3aa580]" /> {scanStatus}
-                <span className="mr-auto text-[#9aa9a7]">
-                  جلسة الكاشير #{userId}
-                </span>
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center justify-between border-b border-[#e5edeb] px-5 py-3">
-            <div className="flex items-center gap-2 text-sm font-extrabold text-[#304b52]">
-              <ShoppingCart size={17} className="text-[#0f6e58]" /> السلة{" "}
-              <span className="rounded-full bg-[#e6f5ef] px-2 py-0.5 text-[10px] text-[#267a60]">
-                {cart.length} أصناف
-              </span>
-            </div>
-            <button
-              onClick={clearCart}
-              disabled={!cart.length}
-              className="text-[11px] font-bold text-[#ad5a59] hover:text-[#8d3437] disabled:opacity-30"
-            >
-              تفريغ السلة
-            </button>
-          </div>
-          <div className="scroll-thin max-h-[360px] overflow-y-auto px-5 py-2">
-            {cart.length === 0 ? (
-              <div className="flex min-h-[235px] flex-col items-center justify-center text-center">
-                <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#edf5f2] text-[#7ba49b]">
-                  <ShoppingCart size={25} />
-                </div>
-                <div className="text-sm font-extrabold text-[#547077]">
-                  السلة فارغة
-                </div>
-                <div className="mt-1 text-xs text-[#99a9a9]">
-                  ابدأ بمسح أول منتج لإضافته تلقائيًا
-                </div>
-              </div>
-            ) : (
-              cart.map(item => (
-                <div
-                  key={item.id}
-                  className="flex items-center gap-3 border-b border-[#edf2f0] py-3 last:border-0"
-                >
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#eff7f4] text-[#267a60]">
-                    <Tag size={17} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-extrabold text-[#29464f]">
-                      {item.name}
-                    </div>
-                    <div className="mono mt-0.5 text-[10px] text-[#91a2a3]">
-                      {item.barcode}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 rounded-lg bg-[#f1f6f4] px-2.5 py-1.5">
-                    <span className="text-xs font-extrabold text-[#3e5b60]">
-                      {integer(item.qty)}
-                    </span>
-                    <span className="text-[10px] text-[#8ba09e]">×</span>
-                  </div>
-                  <div className="w-24 text-left font-extrabold text-[#24444c]">
-                    {money(item.price * item.qty)}
-                  </div>
-                  <button
-                    onClick={() => removeItem(item.id)}
-                    aria-label={`حذف ${item.name}`}
-                    className="text-[#aebcba] hover:text-[#bd4e51]"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
-        </section>
-        <aside className="soft-shadow flex flex-col rounded-2xl border border-[#173645] bg-[#071723] text-white">
-          <div className="flex items-center justify-between border-b border-[#1c3b49] px-5 py-4">
-            <div>
-              <div className="text-sm font-extrabold">ملخص الفاتورة</div>
-              <div className="mt-1 text-[10px] text-[#7f9b9e]">
-                فاتورة جديدة · نقدي
-              </div>
-            </div>
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#123447] text-[#b8efdc]">
-              <Receipt size={17} />
-            </div>
-          </div>
-          <div className="flex-1 space-y-4 px-5 py-6">
-            <div className="flex items-center justify-between text-xs text-[#9bb1b2]">
-              <span>المجموع الفرعي</span>
-              <span className="mono text-[#d7e8e4]">{money(total)}</span>
-            </div>
-            <div className="flex items-center justify-between text-xs text-[#9bb1b2]">
-              <span>الخصم</span>
-              <span className="mono text-[#b8efdc]">0.00 ج.م</span>
-            </div>
-            <div className="flex items-center justify-between text-xs text-[#9bb1b2]">
-              <span>الضريبة</span>
-              <span className="mono text-[#d7e8e4]">0.00 ج.م</span>
-            </div>
-            <div className="border-t border-[#214351] pt-5">
-              <div className="text-[11px] font-bold text-[#91a9a9]">
-                الإجمالي المستحق
-              </div>
-              <div className="mt-1 text-4xl font-extrabold tracking-tight text-[#b8efdc]">
-                {Number(total).toLocaleString("ar-EG", {
-                  minimumFractionDigits: 2,
-                })}
-                <span className="mr-2 text-sm font-bold text-[#94b8ae]">
-                  ج.م
-                </span>
-              </div>
-            </div>
-            <div className="rounded-xl border border-[#244957] bg-[#0d2a39] p-3 text-[11px] leading-5 text-[#94aeae]">
-              <div className="mb-1 flex items-center gap-2 font-extrabold text-[#c8dcd7]">
-                <CreditCard size={14} className="text-[#ffda73]" /> طريقة الدفع
-              </div>
-              نقدي · يمكنك التبديل لاحقًا إلى بطاقة أو طرق أخرى
-            </div>
-          </div>
-          <div className="border-t border-[#1c3b49] p-5">
-            <button
-              onClick={submitInvoice}
-              disabled={createInvoice.isPending || !cart.length}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#b8efdc] px-4 py-3.5 text-sm font-extrabold text-[#08231e] shadow-[0_10px_25px_rgba(184,239,220,0.14)] hover:bg-[#d2faec] disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {createInvoice.isPending
-                ? "جارٍ حفظ الفاتورة..."
-                : "إنشاء الفاتورة"}
-              <ChevronLeft size={18} />
-            </button>
-            <div className="mt-3 flex items-center justify-center gap-2 text-[10px] text-[#789397]">
-              <Printer size={13} /> يمكن الطباعة بعد الحفظ · Ctrl + P
-            </div>
-          </div>
-        </aside>
-      </div>
-      <div className="grid gap-4 sm:grid-cols-3">
-        <div className="flex items-center gap-3 rounded-2xl border border-[#dce9e4] bg-white px-4 py-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#fff3cf] text-[#a37400]">
-            <Zap size={15} />
-          </div>
-          <div>
-            <div className="text-xs font-extrabold text-[#38535a]">
-              مسح متواصل
-            </div>
-            <div className="text-[10px] text-[#8b9a9a]">
-              Queue sequential processing
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center gap-3 rounded-2xl border border-[#dce9e4] bg-white px-4 py-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#e6f6f0] text-[#287e64]">
-            <ShieldCheck size={15} />
-          </div>
-          <div>
-            <div className="text-xs font-extrabold text-[#38535a]">حفظ ذري</div>
-            <div className="text-[10px] text-[#8b9a9a]">
-              Invoice transaction · no stock tracking
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center gap-3 rounded-2xl border border-[#dce9e4] bg-white px-4 py-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#e8eef7] text-[#3d6793]">
-            <History size={15} />
-          </div>
-          <div>
-            <div className="text-xs font-extrabold text-[#38535a]">
-              سجل كامل
-            </div>
-            <div className="text-[10px] text-[#8b9a9a]">
-              كل حركة قابلة للتتبع
-            </div>
-          </div>
-        </div>
-      </div>
-      <VoiceCommandButton
-        onTranscript={handleVoiceCommand}
-        prompt={
-          voiceInvoiceMode ? "قل اسم المنتج أو قل احفظ" : "قل اعمل فاتورة جديدة"
-        }
-        className="fixed bottom-20 left-4 z-[45] shadow-xl lg:bottom-5"
-      />
-      <BarcodeCameraScanner
-        open={cameraOpen}
-        onClose={() => setCameraOpen(false)}
-        onDetected={handleCameraDetected}
-      />
     </div>
   );
 }
@@ -1460,8 +1014,8 @@ function SettingsView({
     | undefined;
 }) {
   const settings = trpc.settings.get.useQuery();
-  const [printerStatus, setPrinterStatus] = useState<"غير متصل" | "متصل">(
-    "غير متصل"
+  const [printerStatus, setPrinterStatus] = useState<"غير محدد" | "تم اختياره">(
+    "غير محدد"
   );
   const [form, setForm] = useState({
     name: "",
@@ -1538,16 +1092,16 @@ function SettingsView({
         optionalServices: ["generic_access", "battery_service"],
       });
       set("printerName", device.name || "طابعة Bluetooth");
-      setPrinterStatus("متصل");
-      toast.success(`تم ربط ${device.name || "الطابعة"}`);
+      setPrinterStatus("تم اختياره");
+      toast.success(`تم اختيار ${device.name || "الطابعة"}؛ أكمل الطباعة من نافذة المتصفح.`);
     } catch {
       toast.info("تم إلغاء اختيار الطابعة أو لم يتم منح الإذن.");
     }
   };
-  const printTest = () => {
-    const popup = window.open("", "_blank", "width=420,height=640");
+  const previewReceipt = () => {
+    const popup = window.open("", "_blank", "width=520,height=760");
     if (!popup) {
-      toast.error("اسمح بالنوافذ المنبثقة للطباعة.");
+      toast.error("اسمح بالنوافذ المنبثقة لهذا الموقع لعرض معاينة الإيصال.");
       return;
     }
     const escape = (value: string, fallback: string) =>
@@ -1558,8 +1112,14 @@ function SettingsView({
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#39;");
     popup.opener = null;
+    const pageSize = form.receiptWidth === "A4" ? "A4 portrait" : `${form.receiptWidth} auto`;
+    const sampleName = escape(form.name, "اسم النشاط");
+    const sampleAddress = escape(form.address, "العنوان");
+    const samplePhone = escape(form.phone, "رقم الهاتف");
+    const sampleHeader = escape(form.receiptHeader, "معاينة الإيصال");
+    const sampleFooter = escape(form.receiptFooter, "شكرًا لزيارتكم");
     popup.document.write(
-      `<html dir="rtl"><head><title>اختبار الطباعة</title><style>body{font-family:Arial;padding:24px;text-align:center}hr{border:0;border-top:1px dashed #555}</style></head><body><h2>${escape(form.name, "اسم النشاط")}</h2><p>${escape(form.address, "العنوان")}</p><p>${escape(form.phone, "رقم الهاتف")}</p><hr><p>${escape(form.receiptHeader, "اختبار طباعة الفاتورة")}</p><p>تم الاتصال بالطابعة: ${escape(form.printerName, "الطباعة النظامية")}</p><hr><p>${escape(form.receiptFooter, "شكرًا لزيارتكم")}</p><script>window.print();window.close();</script></body></html>`
+      `<html dir="rtl"><head><meta charset="UTF-8"><title>معاينة إيصال سوقي</title><style>@page{size:${pageSize};margin:5mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#152d32;margin:0;background:#eef3f1;padding:18px}.controls{display:flex;gap:8px;justify-content:center;margin:0 auto 14px}.controls button{border:0;border-radius:8px;background:#0f5d4d;color:#fff;font-weight:700;padding:10px 14px;cursor:pointer}.controls button:last-child{background:#e3ebe7;color:#34515a}.paper{background:white;margin:auto;padding:14px;width:100%;max-width:${form.receiptWidth === "A4" ? "190mm" : form.receiptWidth};box-shadow:0 5px 22px #17364522;text-align:center}.paper h2{margin:4px 0;font-size:18px}.meta,.footer{font-size:11px;line-height:1.7;color:#526c70}.dash{border:0;border-top:1px dashed #748887;margin:12px 0}.receipt-title{font-weight:bold}.line{display:flex;justify-content:space-between;gap:10px;text-align:right;font-size:12px;margin:8px 0}.total{font-weight:800;font-size:15px}.disclaimer{font-size:10px;color:#8a9c9c;margin-top:10px}@media print{body{background:white;padding:0}.controls,.disclaimer{display:none}.paper{box-shadow:none;max-width:none}}</style></head><body><div class="controls"><button onclick="window.print()">طباعة من المتصفح</button><button onclick="window.close()">إغلاق</button></div><main class="paper"><h2>${sampleName}</h2><div class="meta">${sampleAddress}<br>${samplePhone}</div><hr class="dash"><div class="receipt-title">${sampleHeader}</div><p class="meta">معاينة فقط · ${new Date().toLocaleDateString("ar-EG")}</p><hr class="dash"><div class="line"><span>مياه معدنية · ١ × ١٢٫٥٠</span><strong>١٢٫٥٠ ج.م</strong></div><hr class="dash"><div class="line total"><span>الإجمالي</span><strong>١٢٫٥٠ ج.م</strong></div><div class="footer">${sampleFooter}</div></main><p class="disclaimer">هذه معاينة تجريبية فقط ولا تُنشئ فاتورة أو تحفظ بيعًا.</p></body></html>`
     );
     popup.document.close();
   };
@@ -1700,7 +1260,7 @@ function SettingsView({
             <div>
               <h3 className="font-extrabold text-[#29464e]">الطابعة</h3>
               <p className="text-[11px] text-[#8a9c9c]">
-                اربط طابعة Bluetooth من Chrome على Android
+                اختر طابعة متوافقة أو استخدم نافذة الطباعة النظامية
               </p>
             </div>
           </div>
@@ -1710,26 +1270,25 @@ function SettingsView({
               onClick={connectPrinter}
               className="rounded-xl bg-[#0f5d4d] px-4 py-3 text-xs font-extrabold text-white"
             >
-              {printerStatus === "متصل"
-                ? "تغيير الطابعة"
-                : "ربط طابعة Bluetooth"}
+                {printerStatus === "تم اختياره"
+                ? "اختيار طابعة أخرى"
+                : "اختيار طابعة Bluetooth"}
             </button>
             <button
               type="button"
-              onClick={printTest}
+              onClick={previewReceipt}
               className="rounded-xl border border-[#dfe9e5] px-4 py-3 text-xs font-extrabold text-[#526c70]"
             >
-              طباعة اختبار
+              معاينة الإيصال والطباعة
             </button>
             <span
-              className={`rounded-full px-3 py-2 text-[11px] font-bold ${printerStatus === "متصل" ? "bg-[#e7f6f0] text-[#267a60]" : "bg-[#fff3cf] text-[#9a7100]"}`}
+              className={`rounded-full px-3 py-2 text-[11px] font-bold ${printerStatus === "تم اختياره" ? "bg-[#e7f6f0] text-[#267a60]" : "bg-[#fff3cf] text-[#9a7100]"}`}
             >
               {printerStatus} {form.printerName && `· ${form.printerName}`}
             </span>
           </div>
           <p className="mt-3 text-[11px] leading-5 text-[#87999a]">
-            إذا لم يدعم الهاتف Web Bluetooth، استخدم زر طباعة اختبار أو نافذة
-            الطباعة النظامية. لا يحتاج الربط إلى مفاتيح Firebase إضافية.
+            اختيار جهاز Bluetooth لا يثبت اتصالًا أو بروتوكول طباعة مباشرًا؛ التوافق يتوقف على الطابعة والمتصفح. زر المعاينة يفتح إيصالًا تجريبيًا غير محفوظ ثم يسمح بالطباعة. إذا لم تظهر النافذة، اسمح بالنوافذ المنبثقة لهذا الموقع.
           </p>
         </section>
         <button
@@ -1856,6 +1415,7 @@ export default function Home() {
     sessionIssue,
   } = useAuth();
   const role = String(user?.role || "OWNER");
+  const online = useOnlineStatus();
   const [location, navigate] = useLocation();
   const bootstrap = trpc.bootstrap.useQuery(undefined, {
     enabled: isAuthenticated,
@@ -1936,7 +1496,7 @@ export default function Home() {
         : "إدارة بيانات المتجر بصلاحيات واضحة";
   const view =
     section === "/pos" ? (
-      <PosView role={role} userId={user?.id || 0} />
+      <PosView role={role} userId={user?.id || 0} online={online} />
     ) : section === "/dashboard" ? (
       <DashboardView metrics={metrics.data || bootstrap.data?.metrics} />
     ) : section === "/products" ? (
@@ -1970,8 +1530,15 @@ export default function Home() {
           subtitle={subtitle}
           navigate={navigate}
           onLogout={() => void logout()}
+          online={online}
         />
         <div className="container pb-24 pt-5 sm:py-7">
+          {!online && section !== "/pos" ? (
+            <div role="status" className="mb-4 flex items-start gap-3 rounded-xl border border-[#f0d8d8] bg-[#fff2ef] px-4 py-3 text-xs leading-5 text-[#8d3d40]">
+              <span className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full bg-[#bd4448]" />
+              <span><strong>لا يوجد اتصال بالإنترنت.</strong> بيانات الإدارة والبحث عن المنتجات وحفظ الفواتير تحتاج إلى اتصال بالخادم.</span>
+            </div>
+          ) : null}
           {metrics.isError && section !== "/pos" ? (
             <div className="mb-4 rounded-xl border border-[#f1d7b3] bg-[#fff8e9] px-4 py-3 text-xs font-semibold text-[#8b6500]">
               تعذر تحميل بعض الإحصاءات الآن، لكن يمكنك متابعة العمل من نقطة

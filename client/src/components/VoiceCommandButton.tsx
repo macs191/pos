@@ -33,12 +33,36 @@ type VoiceCommandButtonProps = {
 
 export function speakArabic(text: string) {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-  window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = "ar-EG";
-  utterance.rate = 0.9;
-  utterance.volume = 1;
-  window.speechSynthesis.speak(utterance);
+  try {
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "ar-EG";
+    utterance.rate = 0.9;
+    utterance.volume = 1;
+    window.speechSynthesis.speak(utterance);
+  } catch {
+    // Speech output is an enhancement; the typed UI remains fully usable.
+  }
+}
+
+function recognitionErrorMessage(code?: string) {
+  switch (code) {
+    case "not-allowed":
+    case "service-not-allowed":
+      return "لم يُسمح باستخدام الميكروفون. فعّل الإذن من إعدادات الموقع ثم جرّب مجددًا.";
+    case "audio-capture":
+      return "لم نعثر على ميكروفون متاح. تحقق من توصيله ثم استخدم الإدخال اليدوي.";
+    case "no-speech":
+      return "لم نسمع كلامًا واضحًا. اضغط على الميكروفون وجرّب مرة أخرى.";
+    case "network":
+      return "تعذر تشغيل خدمة التعرف الصوتي عبر الشبكة. يمكنك الكتابة أو مسح الباركود.";
+    case "language-not-supported":
+      return "التعرف الصوتي العربي غير متاح في هذا المتصفح؛ استخدم الإدخال اليدوي.";
+    case "aborted":
+      return "تم إيقاف الاستماع.";
+    default:
+      return "تعذر استخدام الميكروفون. تحقق من الإذن أو أكمل الإدخال يدويًا.";
+  }
 }
 
 export function VoiceCommandButton({
@@ -50,20 +74,17 @@ export function VoiceCommandButton({
 }: VoiceCommandButtonProps) {
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const [listening, setListening] = useState(false);
-  const [unsupported, setUnsupported] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => () => recognitionRef.current?.stop(), []);
 
   const toggle = () => {
-    const Recognition =
-      typeof window !== "undefined"
-        ? window.SpeechRecognition || window.webkitSpeechRecognition
-        : undefined;
+    const Recognition = typeof window !== "undefined"
+      ? window.SpeechRecognition || window.webkitSpeechRecognition
+      : undefined;
     if (!Recognition) {
-      setUnsupported(true);
-      speakArabic(
-        "المتصفح لا يدعم الأوامر الصوتية. استخدم Chrome على أندرويد."
-      );
+      setMessage("هذا المتصفح لا يدعم التعرف الصوتي. استخدم Chrome على Android أو أدخل البيانات يدويًا.");
+      speakArabic("المتصفح لا يدعم الأوامر الصوتية. استخدم الإدخال اليدوي.");
       return;
     }
     if (listening) {
@@ -72,23 +93,21 @@ export function VoiceCommandButton({
       return;
     }
 
+    setMessage(null);
     const recognition = new Recognition();
     recognition.lang = "ar-EG";
     recognition.interimResults = false;
     recognition.continuous = false;
     recognition.onresult = event => {
       const transcript = event.results[0]?.[0]?.transcript?.trim();
-      recognition.stop();
+      setListening(false);
       if (transcript) onTranscript(transcript);
+      else setMessage("لم يتم التعرّف على الكلام؛ حاول مرة أخرى أو اكتب يدويًا.");
     };
     recognition.onerror = event => {
       setListening(false);
-      if (
-        event.error === "not-allowed" ||
-        event.error === "service-not-allowed"
-      ) {
-        speakArabic("اسمح باستخدام الميكروفون من إعدادات المتصفح.");
-      }
+      if (event.error !== "aborted") speakArabic(recognitionErrorMessage(event.error));
+      setMessage(recognitionErrorMessage(event.error));
     };
     recognition.onend = () => setListening(false);
     recognitionRef.current = recognition;
@@ -98,11 +117,12 @@ export function VoiceCommandButton({
       if (speakPrompt) speakArabic(prompt);
     } catch {
       setListening(false);
+      setMessage("لم يبدأ الميكروفون. تحقق من إذن المتصفح ثم استخدم الإدخال اليدوي.");
     }
   };
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex min-w-0 flex-col items-start gap-1.5">
       <button
         type="button"
         onClick={toggle}
@@ -112,17 +132,11 @@ export function VoiceCommandButton({
       >
         <span className="relative flex h-4 w-4 items-center justify-center">
           {listening ? <MicOff size={15} /> : <Mic size={15} />}
-          {listening && (
-            <span className="absolute -inset-1 animate-ping rounded-full bg-[#ffb3aa]/30" />
-          )}
+          {listening && <span className="absolute -inset-1 animate-ping rounded-full bg-[#ffb3aa]/30" />}
         </span>
         {listening ? "جارٍ الاستماع..." : buttonLabel}
       </button>
-      {unsupported && (
-        <span className="text-[10px] text-[#a83d42]">
-          يحتاج Chrome على Android
-        </span>
-      )}
+      {message && <span role="status" className="max-w-full text-[10px] leading-5 text-[#a83d42]">{message}</span>}
     </div>
   );
 }

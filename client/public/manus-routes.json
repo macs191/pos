@@ -1,0 +1,15 @@
+{
+  "routes": [
+    { "path": "/", "title": "الصفحة الرئيسية" },
+    { "path": "/pos", "title": "نقطة البيع" },
+    { "path": "/dashboard", "title": "لوحة المتجر" },
+    { "path": "/products", "title": "المنتجات" },
+    { "path": "/invoices", "title": "الفواتير" },
+    { "path": "/reports", "title": "التقارير" },
+    { "path": "/users", "title": "المستخدمون" },
+    { "path": "/branches", "title": "الفروع" },
+    { "path": "/subscriptions", "title": "الاشتراك" },
+    { "path": "/settings", "title": "الإعدادات" },
+    { "path": "/super-admin", "title": "إدارة المنصة" }
+  ]
+}

@@ -1,14 +1,43 @@
 {
-  "name": "سوقي | نقاط البيع",
+  "id": "/",
+  "name": "سوقي | نظام نقاط البيع",
   "short_name": "سوقي",
   "lang": "ar",
   "dir": "rtl",
   "start_url": "/pos",
   "scope": "/",
   "display": "standalone",
-  "orientation": "portrait",
-  "background_color": "#071723",
+  "display_override": ["standalone", "minimal-ui"],
+  "background_color": "#f2f6f4",
   "theme_color": "#071723",
   "description": "تطبيق نقاط بيع عربي سريع لإدارة المنتجات والمبيعات بالباركود.",
-  "categories": ["business", "shopping", "productivity"]
+  "categories": ["business", "shopping", "productivity"],
+  "icons": [
+    {
+      "src": "/icons/souqi-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/souqi-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/souqi-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "نقطة البيع",
+      "short_name": "بيع",
+      "url": "/pos",
+      "icons": [{ "src": "/icons/souqi-192.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ]
 }
